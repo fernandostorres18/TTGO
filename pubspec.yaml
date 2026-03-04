@@ -1,0 +1,59 @@
+name: fulfillment_master
+description: Sistema completo de gestão de fulfillment logístico multiempresa
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # State management
+  provider: 6.1.5+1
+
+  # Local storage
+  shared_preferences: 2.5.3
+  hive: 2.2.3
+  hive_flutter: 1.1.0
+
+  # HTTP
+  http: 1.5.0
+
+  # UI
+  cupertino_icons: ^1.0.8
+  fl_chart: ^0.69.0
+  data_table_2: ^2.5.14
+  flutter_staggered_grid_view: ^0.7.0
+
+  # Utilities
+  intl: ^0.19.0
+  uuid: ^4.5.1
+  barcode_widget: ^2.0.4
+  qr_flutter: ^4.1.0
+  xml: ^6.5.0
+  path_provider: ^2.1.5
+  open_file: ^3.5.10
+  pdf: ^3.11.3
+  printing: ^5.13.4
+  csv: ^6.0.0
+  image_picker: ^1.1.2
+  file_picker: ^8.1.7
+  flutter_svg: ^2.0.17
+
+  # Icons
+  material_symbols_icons: ^4.2831.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^5.0.0
+  hive_generator: ^2.0.1
+  build_runner: ^2.4.13
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/icons/
+    - assets/images/
