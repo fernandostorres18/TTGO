@@ -1,5 +1,8 @@
 // lib/screens/clients/clients_screen.dart
+import 'dart:convert';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:file_picker/file_picker.dart';
 import 'package:provider/provider.dart';
 import '../../services/data_service.dart';
 import '../../models/app_models.dart';
@@ -328,6 +331,8 @@ class _ClientFormSheetState extends State<_ClientFormSheet> {
   late final _largeCtrl = TextEditingController(text: widget.client?.priceLargeOrder.toString() ?? '20');
   late final _envCtrl = TextEditingController(text: widget.client?.priceEnvelopeOrder.toString() ?? '5');
   late final _photoCtrl = TextEditingController(text: widget.client?.photoUrl ?? '');
+  // Guarda bytes da imagem selecionada localmente (web: base64, nativo: caminho)
+  String? _localPhotoData; // 'data:image/...' base64 ou caminho local
   ClientStatus _status = ClientStatus.ativo;
   bool _loading = false;
 
@@ -339,7 +344,7 @@ class _ClientFormSheetState extends State<_ClientFormSheet> {
 
   @override
   Widget build(BuildContext context) {
-    final photoPreview = _photoCtrl.text.isNotEmpty ? _photoCtrl.text : null;
+    final photoPreview = _localPhotoData ?? (_photoCtrl.text.isNotEmpty ? _photoCtrl.text : null);
     return Padding(
       padding: EdgeInsets.fromLTRB(20, 16, 20, MediaQuery.of(context).viewInsets.bottom + 20),
       child: Form(
@@ -372,12 +377,7 @@ class _ClientFormSheetState extends State<_ClientFormSheet> {
                           child: photoPreview != null
                               ? ClipRRect(
                                   borderRadius: BorderRadius.circular(11),
-                                  child: Image.network(
-                                    photoPreview,
-                                    fit: BoxFit.cover,
-                                    errorBuilder: (_, __, ___) => const Icon(
-                                      Icons.business, color: AppTheme.primary, size: 28),
-                                  ),
+                                  child: _buildPhotoWidget(photoPreview, 56, 56),
                                 )
                               : const Icon(Icons.add_a_photo, color: AppTheme.primary, size: 26),
                         ),
@@ -415,7 +415,7 @@ class _ClientFormSheetState extends State<_ClientFormSheet> {
                 const SizedBox(width: 10),
                 Expanded(
                   child: DropdownButtonFormField<ClientStatus>(
-                    value: _status,
+                    initialValue: _status,
                     decoration: const InputDecoration(labelText: 'Status', prefixIcon: Icon(Icons.toggle_on, size: 18)),
                     items: ClientStatus.values.map((s) => DropdownMenuItem(
                       value: s,
@@ -463,8 +463,52 @@ class _ClientFormSheetState extends State<_ClientFormSheet> {
       decoration: InputDecoration(labelText: label, prefixIcon: Icon(icon, size: 18)),
     );
 
+  // Constrói o widget de imagem — suporta base64 local e URL remota
+  Widget _buildPhotoWidget(String src, double w, double h) {
+    if (src.startsWith('data:image')) {
+      final b64 = src.split(',').last;
+      return Image.memory(
+        base64Decode(b64),
+        width: w, height: h, fit: BoxFit.cover,
+        errorBuilder: (_, __, ___) =>
+            const Icon(Icons.broken_image, color: AppTheme.textHint),
+      );
+    }
+    return Image.network(
+      src, width: w, height: h, fit: BoxFit.cover,
+      errorBuilder: (_, __, ___) =>
+          const Icon(Icons.broken_image, color: AppTheme.textHint),
+    );
+  }
+
+  Future<void> _pickPhoto() async {
+    final result = await FilePicker.platform.pickFiles(
+      type: FileType.image,
+      allowMultiple: false,
+      withData: true, // necessário para web
+    );
+    if (result == null || result.files.isEmpty) return;
+    final file = result.files.first;
+    if (file.bytes != null) {
+      // Web: converter para base64 data-url
+      final mime = file.extension == 'png' ? 'image/png' : 'image/jpeg';
+      final b64 = base64Encode(file.bytes!);
+      setState(() {
+        _localPhotoData = 'data:$mime;base64,$b64';
+        _photoCtrl.text = ''; // limpa URL antiga
+      });
+    } else if (!kIsWeb && file.path != null) {
+      // Android/iOS: usar caminho do arquivo
+      setState(() {
+        _localPhotoData = file.path!;
+        _photoCtrl.text = '';
+      });
+    }
+  }
+
   void _showPhotoDialog(BuildContext context) {
-    final tempCtrl = TextEditingController(text: _photoCtrl.text);
+    final hasPhoto = _localPhotoData != null || _photoCtrl.text.isNotEmpty;
+    final currentSrc = _localPhotoData ?? (_photoCtrl.text.isNotEmpty ? _photoCtrl.text : null);
     showDialog(
       context: context,
       builder: (_) => AlertDialog(
@@ -478,58 +522,55 @@ class _ClientFormSheetState extends State<_ClientFormSheet> {
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            // Preview
-            if (_photoCtrl.text.isNotEmpty)
+            // Preview atual
+            if (currentSrc != null)
               Padding(
                 padding: const EdgeInsets.only(bottom: 12),
                 child: ClipRRect(
                   borderRadius: BorderRadius.circular(12),
-                  child: Image.network(
-                    _photoCtrl.text,
-                    height: 100,
-                    width: 100,
-                    fit: BoxFit.cover,
-                    errorBuilder: (_, __, ___) => const Icon(
-                        Icons.broken_image, size: 60, color: AppTheme.textHint),
-                  ),
+                  child: _buildPhotoWidget(currentSrc, 100, 100),
                 ),
               ),
-            TextField(
-              controller: tempCtrl,
-              decoration: const InputDecoration(
-                labelText: 'URL da foto (https://...)',
-                hintText: 'Cole o link da imagem aqui',
-                prefixIcon: Icon(Icons.link, size: 18),
+            // Botão selecionar arquivo
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton.icon(
+                icon: const Icon(Icons.photo_library_outlined),
+                label: Text(hasPhoto ? 'Trocar foto' : 'Selecionar foto'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppTheme.primary,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                ),
+                onPressed: () async {
+                  Navigator.pop(context);
+                  await _pickPhoto();
+                },
               ),
-              keyboardType: TextInputType.url,
             ),
             const SizedBox(height: 8),
             const Text(
-              'Cole a URL de uma imagem (logo da empresa, etc.)',
+              'Selecione uma imagem do seu dispositivo (JPG, PNG)',
               style: TextStyle(fontSize: 11, color: AppTheme.textSecondary),
               textAlign: TextAlign.center,
             ),
           ],
         ),
         actions: [
-          if (_photoCtrl.text.isNotEmpty)
+          if (hasPhoto)
             TextButton(
               onPressed: () {
-                setState(() => _photoCtrl.clear());
+                setState(() {
+                  _photoCtrl.clear();
+                  _localPhotoData = null;
+                });
                 Navigator.pop(context);
               },
               child: const Text('Remover foto', style: TextStyle(color: AppTheme.error)),
             ),
           TextButton(
             onPressed: () => Navigator.pop(context),
-            child: const Text('Cancelar'),
-          ),
-          ElevatedButton(
-            onPressed: () {
-              setState(() => _photoCtrl.text = tempCtrl.text.trim());
-              Navigator.pop(context);
-            },
-            child: const Text('Confirmar'),
+            child: const Text('Fechar'),
           ),
         ],
       ),
@@ -538,7 +579,8 @@ class _ClientFormSheetState extends State<_ClientFormSheet> {
 
   Future<void> _save() async {
     setState(() => _loading = true);
-    final photo = _photoCtrl.text.trim().isNotEmpty ? _photoCtrl.text.trim() : null;
+    // Prioriza foto local (base64), depois URL digitada
+    final photo = _localPhotoData ?? (_photoCtrl.text.trim().isNotEmpty ? _photoCtrl.text.trim() : null);
     if (widget.client == null) {
       final client = Client(
         id: widget.ds.newClientId(),

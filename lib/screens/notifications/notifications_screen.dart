@@ -1,4 +1,6 @@
 // lib/screens/notifications/notifications_screen.dart
+// ignore: avoid_web_libraries_in_flutter
+import 'dart:html' as html;
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../services/data_service.dart';
@@ -6,22 +8,91 @@ import '../../models/app_models.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/widgets/common_widgets.dart';
 
+// ─── SOUND HELPER ─────────────────────────────────────────────────────────
+
+class SoundHelper {
+  static void _playTone(String script) {
+    try {
+      final el = html.ScriptElement()..text = script;
+      html.document.head!.append(el);
+      el.remove();
+    } catch (_) {}
+  }
+
+  static void playNotification() {
+    _playTone('''
+(function(){try{
+  var c=new AudioContext();
+  var o=c.createOscillator();var g=c.createGain();
+  o.connect(g);g.connect(c.destination);
+  o.type='sine';o.frequency.value=880;g.gain.value=0.1;
+  o.start(c.currentTime);o.stop(c.currentTime+0.15);
+}catch(e){}}());
+''');
+  }
+
+  static void playSuccess() {
+    _playTone('''
+(function(){try{
+  var c=new AudioContext();
+  [523,659].forEach(function(f,i){
+    var o=c.createOscillator();var g=c.createGain();
+    o.connect(g);g.connect(c.destination);
+    o.type='sine';o.frequency.value=f;g.gain.value=0.1;
+    o.start(c.currentTime+i*0.15);o.stop(c.currentTime+i*0.15+0.12);
+  });
+}catch(e){}}());
+''');
+  }
+
+  static void playAlert() {
+    _playTone('''
+(function(){try{
+  var c=new AudioContext();
+  var o=c.createOscillator();var g=c.createGain();
+  o.connect(g);g.connect(c.destination);
+  o.type='square';o.frequency.value=440;g.gain.value=0.08;
+  o.start(c.currentTime);o.stop(c.currentTime+0.3);
+}catch(e){}}());
+''');
+  }
+}
+
 // ─── NOTIFICATION BELL WIDGET ─────────────────────────────────────────────
 
-class NotificationBell extends StatelessWidget {
+class NotificationBell extends StatefulWidget {
   const NotificationBell({super.key});
+  @override
+  State<NotificationBell> createState() => _NotificationBellState();
+}
+
+class _NotificationBellState extends State<NotificationBell> {
+  int _lastCount = 0;
 
   @override
   Widget build(BuildContext context) {
     final ds = context.watch<DataService>();
     final unread = ds.currentUserUnreadCount;
 
+    // Play sound when new notifications arrive
+    if (unread > _lastCount) {
+      _lastCount = unread;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        SoundHelper.playNotification();
+      });
+    } else {
+      _lastCount = unread;
+    }
+
     return Stack(
       children: [
         IconButton(
           icon: const Icon(Icons.notifications_outlined, color: Colors.white),
-          onPressed: () => Navigator.push(
-            context, MaterialPageRoute(builder: (_) => const NotificationsScreen())),
+          onPressed: () {
+            // Não toca som ao abrir notificações — som só ao receber mensagem
+            Navigator.push(
+              context, MaterialPageRoute(builder: (_) => const NotificationsScreen()));
+          },
         ),
         if (unread > 0)
           Positioned(

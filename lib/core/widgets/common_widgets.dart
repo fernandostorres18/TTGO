@@ -1,4 +1,5 @@
 // lib/core/widgets/common_widgets.dart
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import '../theme/app_theme.dart';
@@ -416,6 +417,18 @@ class ClientAvatar extends StatelessWidget {
 
     // Se tem foto, mostra a imagem com fallback para iniciais
     if (photoUrl != null && photoUrl!.isNotEmpty) {
+      // Suporta base64 (seleção local) e URL remota
+      if (photoUrl!.startsWith('data:image')) {
+        final b64 = photoUrl!.split(',').last;
+        return ClipRRect(
+          borderRadius: BorderRadius.circular(size / 4),
+          child: Image.memory(
+            base64Decode(b64),
+            width: size, height: size, fit: BoxFit.cover,
+            errorBuilder: (_, __, ___) => _initialsWidget(color),
+          ),
+        );
+      }
       return ClipRRect(
         borderRadius: BorderRadius.circular(size / 4),
         child: Image.network(

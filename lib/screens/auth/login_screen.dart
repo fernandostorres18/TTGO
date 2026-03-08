@@ -43,7 +43,17 @@ class _LoginScreenState extends State<LoginScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       body: Container(
-        decoration: AppTheme.headerGradient,
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [
+              Color(0xFF6A0DAD), // roxo TTGO escuro
+              Color(0xFF7B1FA2), // roxo principal
+              Color(0xFF5C0080), // roxo mais escuro base
+            ],
+          ),
+        ),
         child: SafeArea(
           child: SingleChildScrollView(
             child: SizedBox(
@@ -51,19 +61,19 @@ class _LoginScreenState extends State<LoginScreen> {
               child: Column(
                 children: [
                   const Spacer(),
-                  // Logo TTGO
+                  // Logo TTGO — imagem com fundo transparente
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 18),
-                    decoration: BoxDecoration(
-                      color: Colors.white.withValues(alpha: 0.15),
-                      borderRadius: BorderRadius.circular(24),
-                      border: Border.all(color: Colors.white.withValues(alpha: 0.3), width: 1.5),
+                    padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 16),
+                    child: Image.asset(
+                      'assets/images/ttgo_logo.png',
+                      height: 100,
+                      fit: BoxFit.contain,
+                      errorBuilder: (_, __, ___) => const TtgoLogo(size: 90),
                     ),
-                    child: const TtgoLogo(size: 52, showText: true, darkBackground: true),
                   ),
-                  const SizedBox(height: 16),
+                  const SizedBox(height: 8),
                   const Text('Sistema de Gestão Logística',
-                    style: TextStyle(color: Colors.white70, fontSize: 14)),
+                    style: TextStyle(color: Colors.white70, fontSize: 14, letterSpacing: 0.5)),
                   const Spacer(),
                   // Login Card
                   Container(

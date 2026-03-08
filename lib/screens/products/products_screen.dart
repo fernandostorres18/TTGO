@@ -190,6 +190,8 @@ class _ProductForm extends StatefulWidget {
 class _ProductFormState extends State<_ProductForm> {
   late final _skuCtrl = TextEditingController(text: widget.product?.sku);
   late final _nameCtrl = TextEditingController(text: widget.product?.name);
+  late final _eanCtrl = TextEditingController(text: widget.product?.ean);
+  late final _nfeCodeCtrl = TextEditingController(text: widget.product?.nfeProductCode);
   late final _weightCtrl = TextEditingController(text: widget.product?.weightKg.toString());
   late final _hCtrl = TextEditingController(text: widget.product?.heightCm.toString());
   late final _wCtrl = TextEditingController(text: widget.product?.widthCm.toString());
@@ -219,7 +221,7 @@ class _ProductFormState extends State<_ProductForm> {
             if (widget.ds.isAdmin)
               DropdownButtonFormField<String>(
                 decoration: const InputDecoration(labelText: 'Cliente *', prefixIcon: Icon(Icons.business, size: 18)),
-                value: _clientId,
+                initialValue: _clientId,
                 items: widget.ds.activeClients.map((c) => DropdownMenuItem(value: c.id, child: Text(c.companyName))).toList(),
                 onChanged: (v) => setState(() => _clientId = v),
               ),
@@ -229,6 +231,38 @@ class _ProductFormState extends State<_ProductForm> {
               const SizedBox(width: 10),
               Expanded(child: _field(_nameCtrl, 'Nome *', Icons.label)),
             ]),
+            const SizedBox(height: 10),
+            // ── Identificação NF-e ──────────────────────────────────────
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.indigo.withValues(alpha: 0.05),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: Colors.indigo.withValues(alpha: 0.2)),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Row(children: [
+                    Icon(Icons.receipt_long, size: 14, color: Colors.indigo),
+                    SizedBox(width: 6),
+                    Text('Identificação na NF-e',
+                        style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: Colors.indigo)),
+                  ]),
+                  const SizedBox(height: 4),
+                  const Text(
+                    'Preencha para cruzar automaticamente com XML de saída.',
+                    style: TextStyle(fontSize: 11, color: AppTheme.textSecondary),
+                  ),
+                  const SizedBox(height: 10),
+                  Row(children: [
+                    Expanded(child: _field(_eanCtrl, 'EAN / GTIN (cEAN)', Icons.barcode_reader)),
+                    const SizedBox(width: 10),
+                    Expanded(child: _field(_nfeCodeCtrl, 'Cód. Produto NF-e (cProd)', Icons.numbers)),
+                  ]),
+                ],
+              ),
+            ),
             const SizedBox(height: 10),
             const Text('Dimensões e Peso', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
             const SizedBox(height: 8),
@@ -268,6 +302,8 @@ class _ProductFormState extends State<_ProductForm> {
         id: widget.ds.newProductId(),
         clientId: _clientId!,
         sku: _skuCtrl.text, name: _nameCtrl.text,
+        ean: _eanCtrl.text.trim(),
+        nfeProductCode: _nfeCodeCtrl.text.trim(),
         weightKg: double.tryParse(_weightCtrl.text) ?? 0,
         heightCm: double.tryParse(_hCtrl.text) ?? 0,
         widthCm: double.tryParse(_wCtrl.text) ?? 0,
@@ -277,6 +313,8 @@ class _ProductFormState extends State<_ProductForm> {
       ));
     } else {
       widget.product!.sku = _skuCtrl.text; widget.product!.name = _nameCtrl.text;
+      widget.product!.ean = _eanCtrl.text.trim();
+      widget.product!.nfeProductCode = _nfeCodeCtrl.text.trim();
       widget.product!.weightKg = double.tryParse(_weightCtrl.text) ?? 0;
       widget.product!.heightCm = double.tryParse(_hCtrl.text) ?? 0;
       widget.product!.widthCm = double.tryParse(_wCtrl.text) ?? 0;

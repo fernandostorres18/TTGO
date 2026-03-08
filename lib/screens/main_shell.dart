@@ -18,6 +18,10 @@ import 'addresses/addresses_screen.dart';
 import 'notifications/notifications_screen.dart';
 import 'users/users_screen.dart';
 import 'history/global_history_screen.dart';
+import 'auth/change_password_screen.dart';
+import 'storage/storage_screen.dart';
+import 'support/support_screen.dart';
+import 'packages/packages_screen.dart';
 
 class MainShell extends StatefulWidget {
   const MainShell({super.key});
@@ -35,6 +39,8 @@ class _MainShellState extends State<MainShell> {
       return _ClientShell(user: user);
     } else if (user.role == UserRole.operator) {
       return _OperatorShell(user: user);
+    } else if (user.role == UserRole.supportAgent) {
+      return _SupportAgentShell(user: user);
     } else {
       return _AdminShell(user: user);
     }
@@ -98,8 +104,13 @@ class _AdminMoreScreen extends StatelessWidget {
               padding: const EdgeInsets.fromLTRB(16, 16, 16, 20),
               child: Row(
                 children: [
-                  // Logo TTGO
-                  const TtgoArrowIcon(size: 32),
+                  // Logo TTGO real
+                  Image.asset(
+                    'assets/images/ttgo_logo.png',
+                    height: 36,
+                    fit: BoxFit.contain,
+                    errorBuilder: (_, __, ___) => const TtgoArrowIcon(size: 32),
+                  ),
                   const SizedBox(width: 10),
                   Expanded(
                     child: Column(
@@ -124,6 +135,7 @@ class _AdminMoreScreen extends StatelessWidget {
                       _MenuItem(icon: Icons.move_to_inbox, title: 'Recebimento de Mercadorias', subtitle: 'Entrada via XML', color: AppTheme.info, onTap: () => _push(context, const ReceivingScreen())),
                       _MenuItem(icon: Icons.content_cut, title: 'Separação de Pedidos', subtitle: 'Bipagem e conferência', color: AppTheme.warning, onTap: () => _push(context, const SeparationScreen())),
                       _MenuItem(icon: Icons.timeline, title: 'Histórico Global', subtitle: 'Todos os eventos do sistema', color: Colors.deepOrange, onTap: () => _push(context, const GlobalHistoryScreen())),
+                      _MenuItem(icon: Icons.support_agent, title: 'Suporte / Chamados', subtitle: 'Tickets e chat com clientes', color: Colors.teal, onTap: () => _push(context, const SupportScreen())),
                     ],
                   ),
                   const SizedBox(height: 12),
@@ -133,6 +145,7 @@ class _AdminMoreScreen extends StatelessWidget {
                       _MenuItem(icon: Icons.category_outlined, title: 'Produtos', subtitle: 'Gerenciar catálogo', color: AppTheme.primary, onTap: () => _push(context, const ProductsScreen())),
                       _MenuItem(icon: Icons.location_on_outlined, title: 'Endereços', subtitle: 'Mapa do armazém', color: Colors.teal, onTap: () => _push(context, const AddressesScreen())),
                       _MenuItem(icon: Icons.people_outline, title: 'Usuários', subtitle: 'Operadores e administradores', color: Colors.deepPurple, onTap: () => _push(context, const UsersScreen())),
+                      _MenuItem(icon: Icons.inbox, title: 'Embalagens', subtitle: 'Tipos, pesos e dimensões', color: Colors.orange, onTap: () => _push(context, const PackagesScreen())),
                     ],
                   ),
                   const SizedBox(height: 12),
@@ -140,9 +153,20 @@ class _AdminMoreScreen extends StatelessWidget {
                     title: 'Financeiro',
                     items: [
                       _MenuItem(icon: Icons.attach_money, title: 'Faturamento Mensal', subtitle: 'Relatórios e cobranças', color: Colors.green, onTap: () => _push(context, const FinancialScreen())),
+                      _MenuItem(icon: Icons.auto_fix_high, title: 'Armazenamento', subtitle: 'Limpeza e economia de dados', color: Colors.blueGrey, onTap: () => _push(context, const StorageScreen())),
                     ],
                   ),
-                  const SizedBox(height: 20),
+                  const SizedBox(height: 12),
+
+                  const SizedBox(height: 12),
+                  ListTile(
+                    leading: const Icon(Icons.lock_reset, color: AppTheme.primary),
+                    title: const Text('Alterar Senha', style: TextStyle(fontSize: 14)),
+                    trailing: const Icon(Icons.chevron_right, size: 18),
+                    contentPadding: EdgeInsets.zero,
+                    onTap: () => _push(context, const ChangePasswordScreen()),
+                  ),
+                  const SizedBox(height: 8),
                   OutlinedButton.icon(
                     onPressed: () => _logout(context),
                     icon: const Icon(Icons.logout, color: AppTheme.error),
@@ -302,6 +326,20 @@ class _OperatorMoreScreen extends StatelessWidget {
                     trailing: const Icon(Icons.chevron_right),
                     onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const LotsScreen())),
                   ),
+                  ListTile(
+                    leading: const Icon(Icons.support_agent, color: Colors.teal),
+                    title: const Text('Suporte / Chamados'),
+                    trailing: const Icon(Icons.chevron_right),
+                    onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const SupportScreen())),
+                  ),
+                  const Divider(),
+                  ListTile(
+                    leading: const Icon(Icons.lock_reset, color: AppTheme.primary),
+                    title: const Text('Alterar Senha'),
+                    trailing: const Icon(Icons.chevron_right),
+                    onTap: () => Navigator.push(context,
+                        MaterialPageRoute(builder: (_) => const ChangePasswordScreen())),
+                  ),
                   const Divider(),
                   ListTile(
                     leading: const Icon(Icons.logout, color: AppTheme.error),
@@ -316,6 +354,60 @@ class _OperatorMoreScreen extends StatelessWidget {
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+// ─── SUPPORT AGENT SHELL ──────────────────────────────────────────────────
+
+class _SupportAgentShell extends StatefulWidget {
+  final AppUser user;
+  const _SupportAgentShell({required this.user});
+  @override
+  State<_SupportAgentShell> createState() => _SupportAgentShellState();
+}
+
+class _SupportAgentShellState extends State<_SupportAgentShell> {
+  int _idx = 0;
+
+  @override
+  Widget build(BuildContext context) {
+    final pages = [
+      const SupportScreen(),
+      const OrdersScreen(),      // somente leitura
+      const FinancialScreen(),   // somente leitura (sem botões de edição)
+      const ChangePasswordScreen(),
+    ];
+    return Scaffold(
+      body: pages[_idx],
+      bottomNavigationBar: BottomNavigationBar(
+        currentIndex: _idx,
+        onTap: (i) => setState(() => _idx = i),
+        selectedItemColor: AppTheme.primary,
+        unselectedItemColor: Colors.grey,
+        items: const [
+          BottomNavigationBarItem(
+            icon: Icon(Icons.support_agent_outlined),
+            activeIcon: Icon(Icons.support_agent),
+            label: 'Atendimento',
+          ),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.receipt_long_outlined),
+            activeIcon: Icon(Icons.receipt_long),
+            label: 'Pedidos',
+          ),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.attach_money_outlined),
+            activeIcon: Icon(Icons.attach_money),
+            label: 'Faturamento',
+          ),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.settings_outlined),
+            activeIcon: Icon(Icons.settings),
+            label: 'Conta',
+          ),
+        ],
       ),
     );
   }
@@ -401,10 +493,24 @@ class _ClientMoreScreen extends StatelessWidget {
                     onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const FinancialScreen())),
                   ),
                   ListTile(
+                    leading: const Icon(Icons.support_agent, color: Colors.teal),
+                    title: const Text('Suporte'),
+                    subtitle: const Text('Chamados e atendimento', style: TextStyle(fontSize: 11)),
+                    trailing: const Icon(Icons.chevron_right),
+                    onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const SupportScreen())),
+                  ),
+                  ListTile(
                     leading: const Icon(Icons.category, color: AppTheme.primary),
                     title: const Text('Meus Produtos'),
                     trailing: const Icon(Icons.chevron_right),
                     onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const ProductsScreen())),
+                  ),
+                  ListTile(
+                    leading: const Icon(Icons.lock_reset, color: AppTheme.primary),
+                    title: const Text('Alterar Senha'),
+                    trailing: const Icon(Icons.chevron_right),
+                    onTap: () => Navigator.push(context,
+                        MaterialPageRoute(builder: (_) => const ChangePasswordScreen())),
                   ),
                   const Divider(),
                   ListTile(

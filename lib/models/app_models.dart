@@ -5,7 +5,19 @@ import 'package:flutter/material.dart' show Icons, IconData;
 
 // ─── ENUMS ─────────────────────────────────────────────────────────────────
 
-enum UserRole { admin, operator, client }
+enum UserRole { admin, operator, client, supportAgent }
+
+extension UserRoleExt on UserRole {
+  String get label {
+    switch (this) {
+      case UserRole.admin: return 'Administrador';
+      case UserRole.operator: return 'Operador';
+      case UserRole.client: return 'Cliente';
+      case UserRole.supportAgent: return 'Atendente de Suporte';
+    }
+  }
+  bool get isStaff => this == UserRole.admin || this == UserRole.operator || this == UserRole.supportAgent;
+}
 
 enum NotificationType {
   newOrder,       // cliente criou pedido → notifica admin/operador
@@ -206,6 +218,8 @@ class Product {
   final String clientId;
   String sku;
   String name;
+  String ean;            // EAN-13 / GTIN (cEAN na NF-e)
+  String nfeProductCode; // Código do produto na NF-e (cProd)
   double weightKg;
   double heightCm;
   double widthCm;
@@ -219,6 +233,8 @@ class Product {
     required this.clientId,
     required this.sku,
     required this.name,
+    this.ean = '',
+    this.nfeProductCode = '',
     required this.weightKg,
     required this.heightCm,
     required this.widthCm,
@@ -238,6 +254,7 @@ class Product {
 
   Map<String, dynamic> toMap() => {
     'id': id, 'clientId': clientId, 'sku': sku, 'name': name,
+    'ean': ean, 'nfeProductCode': nfeProductCode,
     'weightKg': weightKg, 'heightCm': heightCm, 'widthCm': widthCm,
     'lengthCm': lengthCm, 'minimumStock': minimumStock, 'isActive': isActive,
     'createdAt': createdAt.toIso8601String(),
@@ -245,6 +262,8 @@ class Product {
 
   factory Product.fromMap(Map<String, dynamic> m) => Product(
     id: m['id'], clientId: m['clientId'], sku: m['sku'], name: m['name'],
+    ean: m['ean'] ?? '',
+    nfeProductCode: m['nfeProductCode'] ?? '',
     weightKg: (m['weightKg'] ?? 0).toDouble(),
     heightCm: (m['heightCm'] ?? 0).toDouble(),
     widthCm: (m['widthCm'] ?? 0).toDouble(),
@@ -418,6 +437,7 @@ class Order {
   final String clientId;
   String clientName;
   String invoiceNumber;
+  String accessKey; // Chave de acesso NF-e (44 dígitos)
   final DateTime createdAt;
   final String createdByUserId;
   final String createdByUserName;
@@ -436,6 +456,7 @@ class Order {
     required this.clientId,
     required this.clientName,
     required this.invoiceNumber,
+    this.accessKey = '',
     required this.createdAt,
     this.createdByUserId = '',
     this.createdByUserName = '',
@@ -454,7 +475,8 @@ class Order {
 
   Map<String, dynamic> toMap() => {
     'id': id, 'clientId': clientId, 'clientName': clientName,
-    'invoiceNumber': invoiceNumber, 'createdAt': createdAt.toIso8601String(),
+    'invoiceNumber': invoiceNumber, 'accessKey': accessKey,
+    'createdAt': createdAt.toIso8601String(),
     'createdByUserId': createdByUserId, 'createdByUserName': createdByUserName,
     'updatedAt': updatedAt?.toIso8601String(), 'status': status.index,
     'size': size.index, 'orderValue': orderValue, 'notes': notes,
@@ -467,6 +489,7 @@ class Order {
   factory Order.fromMap(Map<String, dynamic> m) => Order(
     id: m['id'], clientId: m['clientId'], clientName: m['clientName'],
     invoiceNumber: m['invoiceNumber'],
+    accessKey: m['accessKey'] ?? '',
     createdAt: DateTime.parse(m['createdAt']),
     createdByUserId: m['createdByUserId'] ?? '',
     createdByUserName: m['createdByUserName'] ?? '',
@@ -772,4 +795,484 @@ class GlobalEvent {
     required this.clientName,
     required this.clientId,
   });
+}
+
+// ─── NF-e XML PARSE RESULT ────────────────────────────────────────────────────
+
+class NfeItem {
+  final String cProd;   // Código do produto na NF-e
+  final String cEAN;    // EAN/GTIN (vazio se "SEM GTIN")
+  final String xProd;   // Descrição do produto
+  final int quantity;
+
+  const NfeItem({
+    required this.cProd,
+    required this.cEAN,
+    required this.xProd,
+    required this.quantity,
+  });
+}
+
+class NfeParseResult {
+  final String invoiceNumber;
+  final String accessKey;   // Chave de acesso 44 dígitos (chNFe)
+  final String clientCnpj;
+  final String clientName;
+  final List<NfeItem> items;
+  final String rawXml;
+  final String? error;
+
+  const NfeParseResult({
+    required this.invoiceNumber,
+    this.accessKey = '',
+    required this.clientCnpj,
+    required this.clientName,
+    required this.items,
+    required this.rawXml,
+    this.error,
+  });
+
+  bool get hasError => error != null;
+}
+
+// ─── STORAGE STATS ────────────────────────────────────────────────────────
+
+class StorageStats {
+  final int activeOrders;
+  final int archivedOrders;
+  final int activeLots;
+  final int totalMovements;
+  final int totalNotifications;
+  final int totalReceivings;
+  final int ordersToArchive;
+  final int archivesToDelete;
+  final int oldMovementsToCompact;
+  final int oldNotificationsToDelete;
+  final int orphanLotsToClean;
+  final int estimatedStorageBytes;
+  final DateTime? lastCleanupAt;
+
+  const StorageStats({
+    required this.activeOrders,
+    required this.archivedOrders,
+    required this.activeLots,
+    required this.totalMovements,
+    required this.totalNotifications,
+    required this.totalReceivings,
+    required this.ordersToArchive,
+    required this.archivesToDelete,
+    required this.oldMovementsToCompact,
+    required this.oldNotificationsToDelete,
+    required this.orphanLotsToClean,
+    required this.estimatedStorageBytes,
+    this.lastCleanupAt,
+  });
+
+  int get totalItemsToClean =>
+      ordersToArchive + archivesToDelete + oldMovementsToCompact +
+      oldNotificationsToDelete + orphanLotsToClean;
+
+  String get estimatedStorageFormatted {
+    if (estimatedStorageBytes < 1024) return '$estimatedStorageBytes B';
+    if (estimatedStorageBytes < 1024 * 1024) {
+      return '${(estimatedStorageBytes / 1024).toStringAsFixed(1)} KB';
+    }
+    return '${(estimatedStorageBytes / (1024 * 1024)).toStringAsFixed(2)} MB';
+  }
+}
+
+// ─── CLEANUP REPORT ──────────────────────────────────────────────────────
+
+class CleanupReport {
+  final int archivedOrders;
+  final int deletedArchives;
+  final int compactedMovements;
+  final int deletedNotifications;
+  final int cleanedOrphanLots;
+  final int trimmedEvents;
+  final DateTime executedAt;
+  final bool isDryRun;
+
+  const CleanupReport({
+    required this.archivedOrders,
+    required this.deletedArchives,
+    required this.compactedMovements,
+    required this.deletedNotifications,
+    required this.cleanedOrphanLots,
+    required this.trimmedEvents,
+    required this.executedAt,
+    required this.isDryRun,
+  });
+
+  int get totalActions =>
+      archivedOrders + deletedArchives + compactedMovements +
+      deletedNotifications + cleanedOrphanLots + trimmedEvents;
+
+  bool get hasChanges => totalActions > 0;
+}
+
+// ─── PACKAGE TYPE (tipo de embalagem editável) ────────────────────────────
+
+class PackageType {
+  String id;
+  String name;          // "Caixa Pequena", "Envelope", etc.
+  String description;
+  double maxWeightKg;   // peso máximo suportado
+  double maxLengthCm;
+  double maxWidthCm;
+  double maxHeightCm;
+  bool isActive;
+  final DateTime createdAt;
+
+  PackageType({
+    required this.id,
+    required this.name,
+    this.description = '',
+    required this.maxWeightKg,
+    this.maxLengthCm = 0,
+    this.maxWidthCm = 0,
+    this.maxHeightCm = 0,
+    this.isActive = true,
+    required this.createdAt,
+  });
+
+  double get maxVolumeCm3 => maxLengthCm * maxWidthCm * maxHeightCm;
+
+  Map<String, dynamic> toMap() => {
+    'id': id, 'name': name, 'description': description,
+    'maxWeightKg': maxWeightKg, 'maxLengthCm': maxLengthCm,
+    'maxWidthCm': maxWidthCm, 'maxHeightCm': maxHeightCm,
+    'isActive': isActive, 'createdAt': createdAt.toIso8601String(),
+  };
+
+  factory PackageType.fromMap(Map<String, dynamic> m) => PackageType(
+    id: m['id'], name: m['name'],
+    description: m['description'] ?? '',
+    maxWeightKg: (m['maxWeightKg'] ?? 1).toDouble(),
+    maxLengthCm: (m['maxLengthCm'] ?? 0).toDouble(),
+    maxWidthCm: (m['maxWidthCm'] ?? 0).toDouble(),
+    maxHeightCm: (m['maxHeightCm'] ?? 0).toDouble(),
+    isActive: m['isActive'] ?? true,
+    createdAt: DateTime.parse(m['createdAt']),
+  );
+}
+
+// ─── SUPPORT TICKET ──────────────────────────────────────────────────────
+
+enum TicketStatus { open, inProgress, pendingClient, resolved, closed }
+enum TicketPriority { low, normal, high, urgent }
+enum TicketCategory { 
+  general, shipping, billing, stock, damage, return_product, 
+  technical, complaint, other
+}
+
+extension TicketStatusExt on TicketStatus {
+  String get label {
+    switch (this) {
+      case TicketStatus.open: return 'Aberto';
+      case TicketStatus.inProgress: return 'Em Atendimento';
+      case TicketStatus.pendingClient: return 'Aguardando Cliente';
+      case TicketStatus.resolved: return 'Resolvido';
+      case TicketStatus.closed: return 'Encerrado';
+    }
+  }
+  bool get isActive => this == TicketStatus.open || this == TicketStatus.inProgress || this == TicketStatus.pendingClient;
+}
+
+extension TicketPriorityExt on TicketPriority {
+  String get label {
+    switch (this) {
+      case TicketPriority.low: return 'Baixa';
+      case TicketPriority.normal: return 'Normal';
+      case TicketPriority.high: return 'Alta';
+      case TicketPriority.urgent: return 'Urgente';
+    }
+  }
+}
+
+extension TicketCategoryExt on TicketCategory {
+  String get label {
+    switch (this) {
+      case TicketCategory.general: return 'Geral';
+      case TicketCategory.shipping: return 'Envio/Frete';
+      case TicketCategory.billing: return 'Faturamento';
+      case TicketCategory.stock: return 'Estoque';
+      case TicketCategory.damage: return 'Avaria';
+      case TicketCategory.return_product: return 'Devolução';
+      case TicketCategory.technical: return 'Técnico';
+      case TicketCategory.complaint: return 'Reclamação';
+      case TicketCategory.other: return 'Outro';
+    }
+  }
+}
+
+class TicketMessage {
+  final String id;
+  final String senderId;
+  final String senderName;
+  final UserRole senderRole;
+  final String text;
+  final DateTime sentAt;
+  final bool isSystem;
+  final String? attachmentUrl;   // base64 data-url ou URL remota
+  final String? attachmentName;  // nome do arquivo
+  final String? attachmentType;  // 'image' | 'file'
+
+  TicketMessage({
+    required this.id,
+    required this.senderId,
+    required this.senderName,
+    required this.senderRole,
+    required this.text,
+    required this.sentAt,
+    this.isSystem = false,
+    this.attachmentUrl,
+    this.attachmentName,
+    this.attachmentType,
+  });
+
+  Map<String, dynamic> toMap() => {
+    'id': id, 'senderId': senderId, 'senderName': senderName,
+    'senderRole': senderRole.index, 'text': text,
+    'sentAt': sentAt.toIso8601String(), 'isSystem': isSystem,
+    if (attachmentUrl != null) 'attachmentUrl': attachmentUrl,
+    if (attachmentName != null) 'attachmentName': attachmentName,
+    if (attachmentType != null) 'attachmentType': attachmentType,
+  };
+
+  factory TicketMessage.fromMap(Map<String, dynamic> m) => TicketMessage(
+    id: m['id'], senderId: m['senderId'], senderName: m['senderName'],
+    senderRole: UserRole.values[m['senderRole'] ?? 0],
+    text: m['text'], sentAt: DateTime.parse(m['sentAt']),
+    isSystem: m['isSystem'] ?? false,
+    attachmentUrl: m['attachmentUrl'],
+    attachmentName: m['attachmentName'],
+    attachmentType: m['attachmentType'],
+  );
+}
+
+class SupportTicket {
+  final String id;
+  final String clientId;
+  final String clientName;
+  final String createdByUserId;
+  final String createdByUserName;
+  TicketStatus status;
+  TicketPriority priority;
+  TicketCategory category;
+  final String subject;
+  String? relatedOrderId;
+  String? relatedOrderInvoice;
+  String? assignedToUserId;
+  String? assignedToUserName;
+  final List<TicketMessage> messages;
+  int? rating;           // 1-5 stars after resolution
+  String? ratingComment;
+  final DateTime createdAt;
+  DateTime? updatedAt;
+  DateTime? resolvedAt;
+  // Return product fields
+  bool isReturnRequest;
+  String? returnLotId;
+  bool? returnToStock;
+  bool? returnApprovedByAdmin;
+  // Novos campos
+  String? agentNotes;          // observações livres do funcionário
+  int? returnQuantity;          // quantidade de itens na devolução
+  String? returnOrderInvoice;   // NF da devolução (busca rápida)
+  bool adminApproved;           // admin aprovou o chamado
+  String? adminApprovalNote;    // nota do admin na aprovação
+  bool adminRejected;           // admin recusou o chamado
+  String? adminRejectionNote;   // motivo da recusa
+  DateTime? startedAt;          // quando o atendente aceitou (para calcular tempo)
+  bool createdByStaff;           // true = chamado criado por funcionário (não cliente)
+
+  SupportTicket({
+    required this.id,
+    required this.clientId,
+    required this.clientName,
+    required this.createdByUserId,
+    required this.createdByUserName,
+    this.status = TicketStatus.open,
+    this.priority = TicketPriority.normal,
+    required this.category,
+    required this.subject,
+    this.relatedOrderId,
+    this.relatedOrderInvoice,
+    this.assignedToUserId,
+    this.assignedToUserName,
+    List<TicketMessage>? messages,
+    this.rating,
+    this.ratingComment,
+    required this.createdAt,
+    this.updatedAt,
+    this.resolvedAt,
+    this.isReturnRequest = false,
+    this.returnLotId,
+    this.returnToStock,
+    this.returnApprovedByAdmin,
+    this.agentNotes,
+    this.returnQuantity,
+    this.returnOrderInvoice,
+    this.adminApproved = false,
+    this.adminApprovalNote,
+    this.adminRejected = false,
+    this.adminRejectionNote,
+    this.startedAt,
+    this.createdByStaff = false,
+  }) : messages = messages ?? [];
+
+  Map<String, dynamic> toMap() => {
+    'id': id, 'clientId': clientId, 'clientName': clientName,
+    'createdByUserId': createdByUserId, 'createdByUserName': createdByUserName,
+    'status': status.index, 'priority': priority.index,
+    'category': category.index, 'subject': subject,
+    'relatedOrderId': relatedOrderId, 'relatedOrderInvoice': relatedOrderInvoice,
+    'assignedToUserId': assignedToUserId, 'assignedToUserName': assignedToUserName,
+    'messages': messages.map((m) => m.toMap()).toList(),
+    'rating': rating, 'ratingComment': ratingComment,
+    'createdAt': createdAt.toIso8601String(),
+    'updatedAt': updatedAt?.toIso8601String(),
+    'resolvedAt': resolvedAt?.toIso8601String(),
+    'isReturnRequest': isReturnRequest,
+    'returnLotId': returnLotId,
+    'returnToStock': returnToStock,
+    'returnApprovedByAdmin': returnApprovedByAdmin,
+    'agentNotes': agentNotes,
+    'returnQuantity': returnQuantity,
+    'returnOrderInvoice': returnOrderInvoice,
+    'adminApproved': adminApproved,
+    'adminApprovalNote': adminApprovalNote,
+    'adminRejected': adminRejected,
+    'adminRejectionNote': adminRejectionNote,
+    'startedAt': startedAt?.toIso8601String(),
+    'createdByStaff': createdByStaff,
+  };
+
+  factory SupportTicket.fromMap(Map<String, dynamic> m) => SupportTicket(
+    id: m['id'], clientId: m['clientId'], clientName: m['clientName'],
+    createdByUserId: m['createdByUserId'], createdByUserName: m['createdByUserName'],
+    status: TicketStatus.values[m['status'] ?? 0],
+    priority: TicketPriority.values[m['priority'] ?? 1],
+    category: TicketCategory.values[m['category'] ?? 0],
+    subject: m['subject'],
+    relatedOrderId: m['relatedOrderId'],
+    relatedOrderInvoice: m['relatedOrderInvoice'],
+    assignedToUserId: m['assignedToUserId'],
+    assignedToUserName: m['assignedToUserName'],
+    messages: (m['messages'] as List? ?? []).map((x) => TicketMessage.fromMap(x)).toList(),
+    rating: m['rating'],
+    ratingComment: m['ratingComment'],
+    createdAt: DateTime.parse(m['createdAt']),
+    updatedAt: m['updatedAt'] != null ? DateTime.parse(m['updatedAt']) : null,
+    resolvedAt: m['resolvedAt'] != null ? DateTime.parse(m['resolvedAt']) : null,
+    isReturnRequest: m['isReturnRequest'] ?? false,
+    returnLotId: m['returnLotId'],
+    returnToStock: m['returnToStock'],
+    returnApprovedByAdmin: m['returnApprovedByAdmin'],
+    agentNotes: m['agentNotes'],
+    returnQuantity: m['returnQuantity'],
+    returnOrderInvoice: m['returnOrderInvoice'],
+    createdByStaff: m['createdByStaff'] ?? false,
+    adminApproved: m['adminApproved'] ?? false,
+    adminApprovalNote: m['adminApprovalNote'],
+    adminRejected: m['adminRejected'] ?? false,
+    adminRejectionNote: m['adminRejectionNote'],
+    startedAt: m['startedAt'] != null ? DateTime.parse(m['startedAt']) : null,
+  );
+}
+
+// ─── SUPPORT SETTINGS (horário de atendimento) ────────────────────────────
+
+class SupportSettings {
+  bool isOnline;               // atendimento ativo agora
+  String offlineMessage;       // mensagem fora do horário
+  String waitMessage;          // mensagem de espera
+  List<int> workDays;          // 1=Seg, 2=Ter, ..., 7=Dom
+  int startHour;
+  int startMinute;
+  int endHour;
+  int endMinute;
+
+  SupportSettings({
+    this.isOnline = true,
+    this.offlineMessage = 'No momento não estamos disponíveis. Seu chamado será respondido no próximo horário de atendimento.',
+    this.waitMessage = 'Olá! Recebemos seu chamado e em breve um atendente irá responder.',
+    this.workDays = const [1, 2, 3, 4, 5],
+    this.startHour = 8,
+    this.startMinute = 0,
+    this.endHour = 18,
+    this.endMinute = 0,
+  });
+
+  bool get isWithinWorkHours {
+    final now = DateTime.now();
+    final weekday = now.weekday; // 1=Seg, 7=Dom
+    if (!workDays.contains(weekday)) return false;
+    final currentMinutes = now.hour * 60 + now.minute;
+    final startMinutes = startHour * 60 + startMinute;
+    final endMinutes = endHour * 60 + endMinute;
+    return currentMinutes >= startMinutes && currentMinutes <= endMinutes;
+  }
+
+  Map<String, dynamic> toMap() => {
+    'isOnline': isOnline, 'offlineMessage': offlineMessage,
+    'waitMessage': waitMessage, 'workDays': workDays,
+    'startHour': startHour, 'startMinute': startMinute,
+    'endHour': endHour, 'endMinute': endMinute,
+  };
+
+  factory SupportSettings.fromMap(Map<String, dynamic> m) => SupportSettings(
+    isOnline: m['isOnline'] ?? true,
+    offlineMessage: m['offlineMessage'] ?? 'No momento não estamos disponíveis.',
+    waitMessage: m['waitMessage'] ?? 'Olá! Recebemos seu chamado.',
+    workDays: (m['workDays'] as List? ?? [1,2,3,4,5]).cast<int>(),
+    startHour: m['startHour'] ?? 8,
+    startMinute: m['startMinute'] ?? 0,
+    endHour: m['endHour'] ?? 18,
+    endMinute: m['endMinute'] ?? 0,
+  );
+}
+
+// ─── BILLING EXTRA (valores adicionais e descontos) ──────────────────────
+
+class BillingExtra {
+  final String id;
+  final String clientId;
+  final int year;
+  final int month;
+  final String description;
+  final double value;  // positivo = adicionar, negativo = desconto
+  final String createdByUserId;
+  final DateTime createdAt;
+
+  BillingExtra({
+    required this.id,
+    required this.clientId,
+    required this.year,
+    required this.month,
+    required this.description,
+    required this.value,
+    required this.createdByUserId,
+    required this.createdAt,
+  });
+
+  bool get isDiscount => value < 0;
+  bool get isExtra => value > 0;
+
+  Map<String, dynamic> toMap() => {
+    'id': id, 'clientId': clientId, 'year': year, 'month': month,
+    'description': description, 'value': value,
+    'createdByUserId': createdByUserId,
+    'createdAt': createdAt.toIso8601String(),
+  };
+
+  factory BillingExtra.fromMap(Map<String, dynamic> m) => BillingExtra(
+    id: m['id'], clientId: m['clientId'],
+    year: m['year'], month: m['month'],
+    description: m['description'],
+    value: (m['value'] ?? 0).toDouble(),
+    createdByUserId: m['createdByUserId'],
+    createdAt: DateTime.parse(m['createdAt']),
+  );
 }

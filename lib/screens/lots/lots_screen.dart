@@ -1,4 +1,6 @@
 // lib/screens/lots/lots_screen.dart
+// ignore: avoid_web_libraries_in_flutter
+import 'dart:html' as html;
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:barcode_widget/barcode_widget.dart';
@@ -317,138 +319,400 @@ class _LotCard extends StatelessWidget {
   }
 
   void _showDetail(BuildContext context) {
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
-      builder: (_) => _LotDetailSheet(lot: lot, ds: ds),
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => LotDetailScreen(lotId: lot.id)),
     );
   }
 }
 
-class _LotDetailSheet extends StatelessWidget {
+class LotDetailScreen extends StatefulWidget {
+  final String lotId;
+  const LotDetailScreen({super.key, required this.lotId});
+  @override
+  State<LotDetailScreen> createState() => _LotDetailScreenState();
+}
+
+class _LotDetailScreenState extends State<LotDetailScreen> {
+  @override
+  Widget build(BuildContext context) {
+    final ds = context.watch<DataService>();
+    final lot = ds.allLots.firstWhere(
+      (l) => l.id == widget.lotId,
+      orElse: () => ds.allLots.first,
+    );
+    return _LotDetailBody(lot: lot, ds: ds);
+  }
+}
+
+class _LotDetailBody extends StatelessWidget {
   final Lot lot;
   final DataService ds;
-  const _LotDetailSheet({required this.lot, required this.ds});
+  const _LotDetailBody({required this.lot, required this.ds});
 
   @override
   Widget build(BuildContext context) {
-    return DraggableScrollableSheet(
-      initialChildSize: 0.85,
-      maxChildSize: 0.95,
-      minChildSize: 0.5,
-      expand: false,
-      builder: (_, ctrl) => SingleChildScrollView(
-        controller: ctrl,
-        child: Padding(
-          padding: const EdgeInsets.all(20),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Center(child: Container(width: 40, height: 4, decoration: BoxDecoration(color: AppTheme.textHint, borderRadius: BorderRadius.circular(2)))),
-              const SizedBox(height: 16),
-              Row(
-                children: [
-                  const Icon(Icons.inventory_2, color: AppTheme.primary, size: 22),
-                  const SizedBox(width: 10),
-                  Expanded(child: Text(lot.productName, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold))),
-                  // Botão Etiqueta
+    final pct = lot.receivedQuantity > 0 ? lot.currentQuantity / lot.receivedQuantity : 0.0;
+    final isLow = lot.currentQuantity == 0;
+
+    // Agrupa movimentações por tipo para cores
+    Color movColor(String type) {
+      if (type == 'entrada') return AppTheme.success;
+      if (type == 'ajuste_entrada') return Colors.teal;
+      if (type == 'ajuste_saida') return Colors.orange;
+      return AppTheme.error; // saida
+    }
+    IconData movIcon(String type) {
+      if (type == 'entrada') return Icons.add_circle;
+      if (type == 'ajuste_entrada') return Icons.tune;
+      if (type == 'ajuste_saida') return Icons.tune;
+      return Icons.remove_circle;
+    }
+    String movLabel(String type) {
+      switch (type) {
+        case 'entrada': return 'ENTRADA';
+        case 'saida': return 'SAÍDA';
+        case 'ajuste_entrada': return 'AJUSTE +';
+        case 'ajuste_saida': return 'AJUSTE −';
+        default: return type.toUpperCase();
+      }
+    }
+    bool isPositive(String type) => type == 'entrada' || type == 'ajuste_entrada';
+
+    return Scaffold(
+      backgroundColor: AppTheme.surface,
+      body: Column(
+        children: [
+          // ── Header ─────────────────────────────────────────────────────
+          Container(
+            decoration: AppTheme.headerGradient,
+            child: SafeArea(
+              bottom: false,
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(4, 12, 16, 16),
+                child: Row(children: [
                   IconButton(
-                    icon: const Icon(Icons.label_outline, color: AppTheme.primary),
-                    tooltip: 'Imprimir Etiqueta',
-                    onPressed: () => _showLabelScreen(context),
+                    icon: const Icon(Icons.arrow_back, color: Colors.white),
+                    onPressed: () => Navigator.pop(context),
+                  ),
+                  const Icon(Icons.inventory_2, color: Colors.white, size: 20),
+                  const SizedBox(width: 10),
+                  Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    Text(lot.productName,
+                        style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 15),
+                        overflow: TextOverflow.ellipsis),
+                    Text('SKU: ${lot.productSku} • ${lot.barcode}',
+                        style: const TextStyle(color: Colors.white70, fontSize: 11)),
+                  ])),
+                  if (ds.isAdmin)
+                    IconButton(
+                      icon: const Icon(Icons.tune, color: Colors.white),
+                      tooltip: 'Ajustar quantidade',
+                      onPressed: () => _showAdjustQuantity(context),
+                    ),
+                  if (ds.isAdmin)
+                    IconButton(
+                      icon: const Icon(Icons.move_down, color: Colors.white),
+                      tooltip: 'Mover para outro endereço',
+                      onPressed: () => _showMoveAddress(context),
+                    ),
+                  IconButton(
+                    icon: const Icon(Icons.label_outline, color: Colors.white),
+                    tooltip: 'Etiqueta',
+                    onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => _LotLabelScreen(lot: lot, ds: ds))),
                   ),
                   if (ds.isAdmin)
                     IconButton(
-                      icon: const Icon(Icons.delete_outline, color: AppTheme.error),
+                      icon: const Icon(Icons.delete_outline, color: Colors.white70),
                       tooltip: 'Excluir lote',
-                      onPressed: () => _confirmDeleteFromDetail(context),
+                      onPressed: () => _confirmDelete(context),
                     ),
-                ],
+                ]),
               ),
-              const SizedBox(height: 16),
-              // Barcode
-              Container(
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(12), border: Border.all(color: AppTheme.divider)),
-                child: Column(
-                  children: [
-                    BarcodeWidget(
-                      barcode: Barcode.code128(),
-                      data: lot.barcode,
-                      width: double.infinity,
-                      height: 60,
-                      style: const TextStyle(fontSize: 12),
-                    ),
-                    const SizedBox(height: 6),
-                    Text(lot.barcode, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: AppTheme.info, letterSpacing: 2)),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 16),
-              _infoCard([
-                _row('Produto', lot.productName),
-                _row('SKU', lot.productSku),
-                _row('NF Entrada', lot.invoiceNumber),
-                _row('Data Entrada', formatDate(lot.receivedAt)),
-                _row('Qtd Recebida', '${lot.receivedQuantity} un.'),
-                _row('Qtd Atual', '${lot.currentQuantity} un.', color: lot.currentQuantity > 0 ? AppTheme.primary : AppTheme.error),
-                _row('Endereço', lot.addressCode, color: AppTheme.primary),
-              ]),
-              const SizedBox(height: 16),
-              const Text('Movimentações', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
-              const SizedBox(height: 8),
-              ...lot.movements.map((m) => Container(
-                margin: const EdgeInsets.only(bottom: 6),
-                padding: const EdgeInsets.all(10),
-                decoration: BoxDecoration(
-                  color: m.type == 'entrada' ? AppTheme.successLight : AppTheme.errorLight,
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Row(
-                  children: [
-                    Icon(m.type == 'entrada' ? Icons.add_circle : Icons.remove_circle,
-                      color: m.type == 'entrada' ? AppTheme.success : AppTheme.error, size: 16),
-                    const SizedBox(width: 8),
-                    Expanded(child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(m.description, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
-                        Text(formatDateTime(m.date), style: const TextStyle(fontSize: 11, color: AppTheme.textSecondary)),
-                      ],
-                    )),
-                    Text('${m.type == 'saida' ? '-' : '+'}${m.quantity} un.',
-                      style: TextStyle(fontWeight: FontWeight.bold,
-                        color: m.type == 'entrada' ? AppTheme.success : AppTheme.error)),
-                  ],
-                ),
-              )),
-            ],
+            ),
           ),
-        ),
+
+          Expanded(
+            child: ListView(
+              padding: const EdgeInsets.all(16),
+              children: [
+
+                // ── Estoque atual ─────────────────────────────────────────
+                Card(
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      Row(children: [
+                        const Icon(Icons.inventory_2, size: 18, color: AppTheme.primary),
+                        const SizedBox(width: 8),
+                        const Text('Estoque Atual', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                      ]),
+                      const SizedBox(height: 12),
+                      Row(children: [
+                        Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                          Row(crossAxisAlignment: CrossAxisAlignment.end, children: [
+                            Text('${lot.currentQuantity}',
+                                style: TextStyle(
+                                  fontSize: 36,
+                                  fontWeight: FontWeight.bold,
+                                  color: isLow ? AppTheme.error : AppTheme.primary,
+                                )),
+                            const SizedBox(width: 4),
+                            Text('/ ${lot.receivedQuantity} un.',
+                                style: const TextStyle(fontSize: 14, color: AppTheme.textSecondary)),
+                          ]),
+                          const SizedBox(height: 6),
+                          ClipRRect(
+                            borderRadius: BorderRadius.circular(6),
+                            child: LinearProgressIndicator(
+                              value: pct,
+                              minHeight: 8,
+                              backgroundColor: AppTheme.divider,
+                              valueColor: AlwaysStoppedAnimation(
+                                isLow ? AppTheme.error : pct < 0.3 ? AppTheme.warning : AppTheme.success,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          Text('${(pct * 100).toStringAsFixed(0)}% restante',
+                              style: TextStyle(
+                                fontSize: 11,
+                                color: isLow ? AppTheme.error : AppTheme.textSecondary,
+                              )),
+                        ])),
+                        const SizedBox(width: 16),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                          decoration: BoxDecoration(
+                            color: (isLow ? AppTheme.error : AppTheme.success).withValues(alpha: 0.1),
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(
+                              color: (isLow ? AppTheme.error : AppTheme.success).withValues(alpha: 0.4),
+                            ),
+                          ),
+                          child: Text(
+                            isLow ? 'ZERADO' : 'ATIVO',
+                            style: TextStyle(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 13,
+                              color: isLow ? AppTheme.error : AppTheme.success,
+                            ),
+                          ),
+                        ),
+                      ]),
+                    ]),
+                  ),
+                ),
+
+                const SizedBox(height: 12),
+
+                // ── Código de barras ─────────────────────────────────────
+                Card(
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Column(children: [
+                      BarcodeWidget(
+                        barcode: Barcode.code128(),
+                        data: lot.barcode,
+                        width: double.infinity,
+                        height: 60,
+                        style: const TextStyle(fontSize: 12),
+                      ),
+                      const SizedBox(height: 6),
+                      Text(lot.barcode,
+                          style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold,
+                              color: AppTheme.info, letterSpacing: 2)),
+                    ]),
+                  ),
+                ),
+
+                const SizedBox(height: 12),
+
+                // ── Informações do lote ───────────────────────────────────
+                Card(
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      const Row(children: [
+                        Icon(Icons.info_outline, size: 16, color: AppTheme.primary),
+                        SizedBox(width: 8),
+                        Text('Informações do Lote', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                      ]),
+                      const Divider(height: 20),
+                      _infoRow('Produto', lot.productName),
+                      _infoRow('SKU', lot.productSku),
+                      _infoRow('NF de Entrada', lot.invoiceNumber),
+                      _infoRow('Data de Entrada', formatDate(lot.receivedAt)),
+                      _infoRow('Qtd Recebida', '${lot.receivedQuantity} un.'),
+                      _infoRow('Qtd Atual', '${lot.currentQuantity} un.',
+                          valueColor: lot.currentQuantity > 0 ? AppTheme.primary : AppTheme.error),
+                      _infoRow('Endereço no Armazém', lot.addressCode,
+                          valueColor: AppTheme.primary),
+                      if (ds.isAdmin)
+                        _infoRow('Cliente', ds.getClient(lot.clientId)?.companyName ?? lot.clientId),
+                    ]),
+                  ),
+                ),
+
+                const SizedBox(height: 12),
+
+                // ── Histórico de Movimentações ────────────────────────────
+                Card(
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+                        const Row(children: [
+                          Icon(Icons.history, size: 16, color: AppTheme.primary),
+                          SizedBox(width: 8),
+                          Text('Histórico de Movimentações',
+                              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                        ]),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                          decoration: BoxDecoration(
+                            color: AppTheme.primarySurface,
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: Text('${lot.movements.length} registro${lot.movements.length != 1 ? "s" : ""}',
+                              style: const TextStyle(fontSize: 11, color: AppTheme.primary, fontWeight: FontWeight.w600)),
+                        ),
+                      ]),
+                      const SizedBox(height: 12),
+
+                      if (lot.movements.isEmpty)
+                        const Padding(
+                          padding: EdgeInsets.symmetric(vertical: 20),
+                          child: Center(
+                            child: Text('Nenhuma movimentação registrada',
+                                style: TextStyle(color: AppTheme.textSecondary, fontSize: 13)),
+                          ),
+                        )
+                      else
+                        // Timeline de movimentações (mais recente primeiro)
+                        ...lot.movements.reversed.toList().asMap().entries.map((entry) {
+                          final idx = entry.key;
+                          final m = entry.value;
+                          final color = movColor(m.type);
+                          final isPos = isPositive(m.type);
+                          final isLast = idx == lot.movements.length - 1;
+
+                          return IntrinsicHeight(
+                            child: Row(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                // Timeline line + dot
+                                Column(children: [
+                                  Container(
+                                    width: 32, height: 32,
+                                    decoration: BoxDecoration(
+                                      color: color.withValues(alpha: 0.12),
+                                      shape: BoxShape.circle,
+                                      border: Border.all(color: color.withValues(alpha: 0.5), width: 1.5),
+                                    ),
+                                    child: Icon(movIcon(m.type), size: 15, color: color),
+                                  ),
+                                  if (!isLast)
+                                    Container(
+                                      width: 2,
+                                      height: 24,
+                                      color: AppTheme.divider,
+                                      margin: const EdgeInsets.symmetric(vertical: 2),
+                                    ),
+                                ]),
+                                const SizedBox(width: 12),
+                                // Content
+                                Expanded(
+                                  child: Container(
+                                    margin: EdgeInsets.only(bottom: isLast ? 0 : 12),
+                                    padding: const EdgeInsets.all(12),
+                                    decoration: BoxDecoration(
+                                      color: color.withValues(alpha: 0.05),
+                                      borderRadius: BorderRadius.circular(10),
+                                      border: Border.all(color: color.withValues(alpha: 0.2)),
+                                    ),
+                                    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                                      Row(
+                                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                        children: [
+                                          // Badge tipo
+                                          Container(
+                                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                            decoration: BoxDecoration(
+                                              color: color.withValues(alpha: 0.15),
+                                              borderRadius: BorderRadius.circular(6),
+                                            ),
+                                            child: Text(movLabel(m.type),
+                                                style: TextStyle(
+                                                  fontSize: 10,
+                                                  fontWeight: FontWeight.bold,
+                                                  color: color,
+                                                )),
+                                          ),
+                                          // Quantidade
+                                          Text(
+                                            '${isPos ? "+" : "−"}${m.quantity} un.',
+                                            style: TextStyle(
+                                              fontWeight: FontWeight.bold,
+                                              fontSize: 16,
+                                              color: color,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                      const SizedBox(height: 6),
+                                      Text(m.description,
+                                          style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+                                      const SizedBox(height: 3),
+                                      Text(formatDateTime(m.date),
+                                          style: const TextStyle(fontSize: 11, color: AppTheme.textSecondary)),
+                                    ]),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          );
+                        }),
+                    ]),
+                  ),
+                ),
+
+                const SizedBox(height: 80),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }
 
-  void _showLabelScreen(BuildContext context) {
-    // rootNavigator: true garante uso do Navigator raiz (necessário no web
-    // quando chamado de dentro de um ModalBottomSheet)
-    Navigator.of(context, rootNavigator: true).push(
-      MaterialPageRoute(builder: (_) => _LotLabelScreen(lot: lot, ds: ds)),
+  void _showMoveAddress(BuildContext context) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (_) => _MoveAddressSheet(lot: lot, ds: ds),
     );
   }
 
-  void _confirmDeleteFromDetail(BuildContext context) {
+  void _showAdjustQuantity(BuildContext context) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (_) => _AdjustQuantitySheet(lot: lot, ds: ds),
+    );
+  }
+
+  void _confirmDelete(BuildContext context) {
     showDialog(
       context: context,
       builder: (_) => AlertDialog(
-        title: const Row(
-          children: [
-            Icon(Icons.warning_amber, color: AppTheme.error),
-            SizedBox(width: 10),
-            Text('Excluir Lote'),
-          ],
-        ),
+        title: const Row(children: [
+          Icon(Icons.warning_amber, color: AppTheme.error),
+          SizedBox(width: 10),
+          Text('Excluir Lote'),
+        ]),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -470,17 +734,14 @@ class _LotDetailSheet extends StatelessWidget {
           ],
         ),
         actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancelar'),
-          ),
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancelar')),
           ElevatedButton(
             style: ElevatedButton.styleFrom(backgroundColor: AppTheme.error),
             onPressed: () async {
-              Navigator.pop(context); // fechar dialog
-              Navigator.pop(context); // fechar bottom sheet
+              Navigator.pop(context);
               final ok = await ds.deleteLot(lot.id);
               if (context.mounted) {
+                Navigator.pop(context); // voltar para lista
                 ScaffoldMessenger.of(context).showSnackBar(SnackBar(
                   content: Text(ok
                       ? 'Lote "${lot.barcode}" excluído com sucesso.'
@@ -496,22 +757,501 @@ class _LotDetailSheet extends StatelessWidget {
     );
   }
 
-  Widget _infoCard(List<Widget> rows) => Container(
-    padding: const EdgeInsets.all(14),
-    decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(12), border: Border.all(color: AppTheme.divider)),
-    child: Column(children: rows),
-  );
-
-  Widget _row(String label, String value, {Color? color}) => Padding(
-    padding: const EdgeInsets.symmetric(vertical: 4),
+  Widget _infoRow(String label, String value, {Color? valueColor}) => Padding(
+    padding: const EdgeInsets.symmetric(vertical: 6),
     child: Row(
-      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(label, style: const TextStyle(fontSize: 13, color: AppTheme.textSecondary)),
-        Text(value, style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: color ?? AppTheme.textPrimary)),
+        SizedBox(
+          width: 140,
+          child: Text(label, style: const TextStyle(fontSize: 13, color: AppTheme.textSecondary)),
+        ),
+        Expanded(
+          child: Text(value,
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+                color: valueColor ?? AppTheme.textPrimary,
+              )),
+        ),
       ],
     ),
   );
+}
+
+class _AdjustQuantitySheet extends StatefulWidget {
+  final Lot lot;
+  final DataService ds;
+  const _AdjustQuantitySheet({required this.lot, required this.ds});
+  @override
+  State<_AdjustQuantitySheet> createState() => _AdjustQuantitySheetState();
+}
+
+class _AdjustQuantitySheetState extends State<_AdjustQuantitySheet> {
+  final _qtyCtrl = TextEditingController(text: '1');
+  final _reasonCtrl = TextEditingController();
+  String _operation = 'add'; // 'add' ou 'remove'
+  bool _loading = false;
+
+  @override
+  void dispose() {
+    _qtyCtrl.dispose();
+    _reasonCtrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: EdgeInsets.only(
+          bottom: MediaQuery.of(context).viewInsets.bottom),
+      child: Container(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Header
+            Row(
+              children: [
+                const Icon(Icons.tune, color: Colors.indigo),
+                const SizedBox(width: 8),
+                const Expanded(
+                  child: Text('Ajustar Quantidade',
+                      style: TextStyle(
+                          fontSize: 16, fontWeight: FontWeight.bold)),
+                ),
+                IconButton(
+                    icon: const Icon(Icons.close),
+                    onPressed: () => Navigator.pop(context)),
+              ],
+            ),
+
+            // Info do lote
+            Container(
+              margin: const EdgeInsets.symmetric(vertical: 12),
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.indigo.withValues(alpha: 0.05),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: Colors.indigo.withValues(alpha: 0.2)),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.inventory_2_outlined,
+                      size: 18, color: Colors.indigo),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(widget.lot.productName,
+                            style: const TextStyle(
+                                fontWeight: FontWeight.bold, fontSize: 14)),
+                        Text('${widget.lot.barcode} • Endereço: ${widget.lot.addressCode}',
+                            style: const TextStyle(
+                                fontSize: 11, color: AppTheme.textSecondary)),
+                      ],
+                    ),
+                  ),
+                  Column(
+                    children: [
+                      Text('${widget.lot.currentQuantity}',
+                          style: const TextStyle(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 22,
+                              color: Colors.indigo)),
+                      const Text('atual',
+                          style: TextStyle(
+                              fontSize: 10, color: AppTheme.textSecondary)),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+
+            // Operação
+            Row(
+              children: [
+                Expanded(
+                  child: _OpChip(
+                    label: '+ Adicionar',
+                    icon: Icons.add_circle_outline,
+                    selected: _operation == 'add',
+                    color: AppTheme.success,
+                    onTap: () => setState(() => _operation = 'add'),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: _OpChip(
+                    label: '− Retirar',
+                    icon: Icons.remove_circle_outline,
+                    selected: _operation == 'remove',
+                    color: AppTheme.error,
+                    onTap: () => setState(() => _operation = 'remove'),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 14),
+
+            // Quantidade
+            TextField(
+              controller: _qtyCtrl,
+              keyboardType: TextInputType.number,
+              decoration: InputDecoration(
+                labelText: 'Quantidade',
+                prefixIcon: Icon(
+                  _operation == 'add'
+                      ? Icons.arrow_upward
+                      : Icons.arrow_downward,
+                  color: _operation == 'add'
+                      ? AppTheme.success
+                      : AppTheme.error,
+                ),
+              ),
+              onChanged: (_) => setState(() {}),
+            ),
+            const SizedBox(height: 10),
+
+            // Motivo
+            TextField(
+              controller: _reasonCtrl,
+              decoration: const InputDecoration(
+                labelText: 'Motivo do ajuste *',
+                hintText: 'Ex: Contagem física, avaria, devolução...',
+                prefixIcon: Icon(Icons.notes),
+              ),
+              maxLines: 1,
+            ),
+            const SizedBox(height: 6),
+
+            // Preview do resultado
+            Builder(builder: (_) {
+              final qty = int.tryParse(_qtyCtrl.text) ?? 0;
+              final delta = _operation == 'add' ? qty : -qty;
+              final result = widget.lot.currentQuantity + delta;
+              return Container(
+                padding: const EdgeInsets.symmetric(
+                    horizontal: 12, vertical: 8),
+                decoration: BoxDecoration(
+                  color: (result < 0 ? AppTheme.error : AppTheme.success)
+                      .withValues(alpha: 0.08),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    const Text('Quantidade após ajuste:',
+                        style: TextStyle(fontSize: 12)),
+                    Text(
+                      result < 0 ? 'Inválido' : '$result unidades',
+                      style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 14,
+                          color: result < 0
+                              ? AppTheme.error
+                              : AppTheme.success),
+                    ),
+                  ],
+                ),
+              );
+            }),
+            const SizedBox(height: 16),
+
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton.icon(
+                onPressed: _loading ? null : _save,
+                icon: _loading
+                    ? const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(
+                            strokeWidth: 2, color: Colors.white))
+                    : const Icon(Icons.check, color: Colors.white),
+                label: Text(
+                  _loading ? 'Salvando...' : 'Confirmar Ajuste',
+                  style: const TextStyle(color: Colors.white),
+                ),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: _operation == 'add'
+                      ? AppTheme.success
+                      : AppTheme.error,
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _save() async {
+    final qty = int.tryParse(_qtyCtrl.text) ?? 0;
+    if (qty <= 0) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Informe uma quantidade válida')));
+      return;
+    }
+    if (_reasonCtrl.text.trim().isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Informe o motivo do ajuste')));
+      return;
+    }
+    setState(() => _loading = true);
+    final delta = _operation == 'add' ? qty : -qty;
+    final error = await widget.ds.adjustLotQuantity(
+        widget.lot.id, delta, _reasonCtrl.text.trim());
+
+    if (mounted) {
+      setState(() => _loading = false);
+      Navigator.pop(context); // fecha sheet de ajuste
+      Navigator.pop(context); // fecha sheet de detalhe
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(error ??
+            'Ajuste realizado! ${_operation == 'add' ? '+$qty' : '-$qty'} unidades no lote ${widget.lot.barcode}.'),
+        backgroundColor: error != null ? AppTheme.error : AppTheme.success,
+      ));
+    }
+  }
+}
+
+class _OpChip extends StatelessWidget {
+  final String label;
+  final IconData icon;
+  final bool selected;
+  final Color color;
+  final VoidCallback onTap;
+  const _OpChip({
+    required this.label,
+    required this.icon,
+    required this.selected,
+    required this.color,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 10),
+        decoration: BoxDecoration(
+          color: selected ? color : color.withValues(alpha: 0.07),
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: color),
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(icon, size: 16, color: selected ? Colors.white : color),
+            const SizedBox(width: 6),
+            Text(label,
+                style: TextStyle(
+                    color: selected ? Colors.white : color,
+                    fontWeight: FontWeight.w600,
+                    fontSize: 13)),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ─── MOVE ADDRESS SHEET ─────────────────────────────────────────────────────
+
+class _MoveAddressSheet extends StatefulWidget {
+  final Lot lot;
+  final DataService ds;
+  const _MoveAddressSheet({required this.lot, required this.ds});
+
+  @override
+  State<_MoveAddressSheet> createState() => _MoveAddressSheetState();
+}
+
+class _MoveAddressSheetState extends State<_MoveAddressSheet> {
+  String? _selectedAddressId;
+  bool _loading = false;
+  String _search = '';
+
+  @override
+  Widget build(BuildContext context) {
+    final ds = widget.ds;
+    final lot = widget.lot;
+
+    // Endereços livres (ou o próprio do lote para exibição)
+    final available = ds.allAddresses
+        .where((a) =>
+            !a.isOccupied ||
+            a.id == lot.addressId ||
+            a.currentLotId == lot.id)
+        .where((a) => _search.isEmpty ||
+            a.code.toLowerCase().contains(_search.toLowerCase()))
+        .toList()
+      ..sort((a, b) => a.code.compareTo(b.code));
+
+    return Padding(
+      padding: EdgeInsets.only(
+          bottom: MediaQuery.of(context).viewInsets.bottom,
+          left: 16, right: 16, top: 8),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Handle
+          Center(
+            child: Container(
+              width: 40, height: 4,
+              margin: const EdgeInsets.only(bottom: 16),
+              decoration: BoxDecoration(
+                color: Colors.grey[300],
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+          ),
+
+          const Text('Mover para outro Endereço',
+              style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold)),
+          const SizedBox(height: 4),
+
+          // Endereço atual
+          Container(
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              color: AppTheme.primarySurface,
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Row(children: [
+              const Icon(Icons.location_on, size: 16, color: AppTheme.primary),
+              const SizedBox(width: 8),
+              Text('Endereço atual: ',
+                  style: const TextStyle(fontSize: 13, color: AppTheme.textSecondary)),
+              Text(lot.addressCode,
+                  style: const TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.bold,
+                      color: AppTheme.primary)),
+            ]),
+          ),
+          const SizedBox(height: 12),
+
+          // Campo de busca
+          TextField(
+            decoration: const InputDecoration(
+              hintText: 'Buscar endereço...',
+              prefixIcon: Icon(Icons.search, size: 18),
+              isDense: true,
+              contentPadding: EdgeInsets.symmetric(vertical: 10),
+            ),
+            onChanged: (v) => setState(() => _search = v),
+          ),
+          const SizedBox(height: 8),
+
+          // Lista de endereços livres
+          if (available.isEmpty)
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 16),
+              child: Center(
+                child: Text('Nenhum endereço livre disponível',
+                    style: TextStyle(color: AppTheme.textSecondary)),
+              ),
+            )
+          else
+            SizedBox(
+              height: 220,
+              child: ListView.builder(
+                itemCount: available.length,
+                itemBuilder: (ctx, i) {
+                  final addr = available[i];
+                  final isCurrent = addr.id == lot.addressId;
+                  final isSelected = _selectedAddressId == addr.id;
+                  return ListTile(
+                    dense: true,
+                    selected: isSelected,
+                    selectedTileColor: AppTheme.primarySurface,
+                    leading: CircleAvatar(
+                      radius: 16,
+                      backgroundColor: isCurrent
+                          ? AppTheme.primary.withValues(alpha: 0.15)
+                          : isSelected
+                              ? AppTheme.primary
+                              : Colors.grey[200],
+                      child: Icon(
+                        isCurrent ? Icons.check : Icons.location_on_outlined,
+                        size: 14,
+                        color: (isCurrent || isSelected) ? AppTheme.primary : Colors.grey[600],
+                      ),
+                    ),
+                    title: Text(addr.code,
+                        style: TextStyle(
+                            fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                            color: isCurrent ? AppTheme.textSecondary : null)),
+                    subtitle: isCurrent ? const Text('Endereço atual', style: TextStyle(fontSize: 11)) : null,
+                    trailing: isCurrent
+                        ? const Chip(
+                            label: Text('Atual', style: TextStyle(fontSize: 10)),
+                            padding: EdgeInsets.zero,
+                            visualDensity: VisualDensity.compact,
+                          )
+                        : null,
+                    onTap: isCurrent
+                        ? null
+                        : () => setState(() => _selectedAddressId = addr.id),
+                  );
+                },
+              ),
+            ),
+
+          const SizedBox(height: 12),
+
+          // Botões
+          Row(children: [
+            Expanded(
+              child: OutlinedButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('Cancelar'),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: ElevatedButton.icon(
+                icon: _loading
+                    ? const SizedBox(
+                        width: 16, height: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                    : const Icon(Icons.move_down, size: 18),
+                label: Text(_loading ? 'Movendo...' : 'Mover'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: _selectedAddressId != null
+                      ? AppTheme.primary
+                      : Colors.grey[400],
+                ),
+                onPressed: _selectedAddressId == null || _loading
+                    ? null
+                    : () async {
+                        setState(() => _loading = true);
+                        final err = await ds.moveLot(lot.id, _selectedAddressId!);
+                        if (!context.mounted) return;
+                        Navigator.pop(context);
+                        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                          content: Text(err == null
+                              ? 'Lote movido para o novo endereço com sucesso!'
+                              : 'Erro: $err'),
+                          backgroundColor: err == null ? AppTheme.success : AppTheme.error,
+                          duration: const Duration(seconds: 3),
+                        ));
+                      },
+              ),
+            ),
+          ]),
+          const SizedBox(height: 16),
+        ],
+      ),
+    );
+  }
 }
 
 // ─── LOT LABEL SCREEN ───────────────────────────────────────────────────────
@@ -520,6 +1260,205 @@ class _LotLabelScreen extends StatelessWidget {
   final Lot lot;
   final DataService ds;
   const _LotLabelScreen({required this.lot, required this.ds});
+
+  void _printLabel(BuildContext context) {
+    final client = ds.getClient(lot.clientId);
+    final clientName = client?.companyName ?? '';
+    final now = DateTime.now();
+    final dataStr =
+        '${now.day.toString().padLeft(2, '0')}/${now.month.toString().padLeft(2, '0')}/${now.year}';
+
+    // Impressora térmica 58 mm — retrato, sem cores de fundo
+    final htmlContent = '''
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Etiqueta ${lot.barcode}</title>
+<script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.6/dist/JsBarcode.all.min.js"></script>
+<style>
+  @page {
+    size: 58mm auto;
+    margin: 0mm 2mm;
+  }
+  * {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+  }
+  html, body {
+    width: 54mm;
+    font-family: Arial, Helvetica, sans-serif;
+    color: #000;
+    background: #fff;
+  }
+  .wrap {
+    width: 54mm;
+    padding: 1mm 0;
+    display: flex;
+    flex-direction: column;
+    gap: 1.2mm;
+  }
+
+  /* --- Cabeçalho: borda simples, sem fundo --- */
+  .hdr {
+    text-align: center;
+    border: 0.6mm solid #000;
+    padding: 1.5mm 0;
+    font-size: 11pt;
+    font-weight: 900;
+    letter-spacing: 0.5pt;
+  }
+
+  /* --- Nome do produto --- */
+  .produto {
+    text-align: center;
+    font-size: 11pt;
+    font-weight: bold;
+    word-break: break-word;
+    padding: 1mm 0;
+    overflow-wrap: break-word;
+  }
+
+  .hr { border-top: 0.5mm solid #000; }
+
+  /* --- Código de barras --- */
+  .bc-wrap {
+    text-align: center;
+    padding: 0;
+    overflow: hidden;
+  }
+  .bc-wrap svg {
+    display: block;
+    width: 54mm !important;
+    height: 14mm !important;
+  }
+  .bc-code {
+    font-family: 'Courier New', monospace;
+    font-size: 8.5pt;
+    font-weight: bold;
+    text-align: center;
+    letter-spacing: 1pt;
+    margin-top: 0.5mm;
+  }
+
+  /* --- Bloco Quantidade --- */
+  .qtd-box {
+    border: 0.5mm solid #000;
+    text-align: center;
+    padding: 1mm 0;
+  }
+  .qtd-lbl {
+    font-size: 7pt;
+    font-weight: bold;
+    text-transform: uppercase;
+  }
+  .qtd-val {
+    font-size: 22pt;
+    font-weight: 900;
+    line-height: 1.1;
+  }
+
+  /* --- Linhas de dados --- */
+  .row {
+    display: flex;
+    gap: 1mm;
+    padding: 0.5mm 0;
+    border-bottom: 0.2mm solid #ccc;
+  }
+  .lbl {
+    font-size: 7pt;
+    font-weight: 900;
+    white-space: nowrap;
+    min-width: 21mm;
+    max-width: 21mm;
+    text-transform: uppercase;
+  }
+  .val {
+    font-size: 8.5pt;
+    font-weight: bold;
+    word-break: break-word;
+    overflow-wrap: break-word;
+    flex: 1;
+    max-width: 31mm;
+  }
+
+  /* --- Rodapé --- */
+  .ftr {
+    text-align: center;
+    font-size: 7pt;
+    border-top: 0.5mm solid #000;
+    padding-top: 1mm;
+  }
+
+  @media print {
+    html, body { margin: 0; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="hdr">ETIQUETA DE LOTE</div>
+
+  <div class="produto">${lot.productName}</div>
+
+  <div class="hr"></div>
+
+  <div class="bc-wrap">
+    <svg id="barcode"></svg>
+    <div class="bc-code">${lot.barcode}</div>
+  </div>
+
+  <div class="hr"></div>
+
+  <div class="qtd-box">
+    <div class="qtd-lbl">QTD EM ESTOQUE</div>
+    <div class="qtd-val">${lot.currentQuantity} un.</div>
+  </div>
+
+  <div class="hr"></div>
+
+  <div class="row"><span class="lbl">SKU</span><span class="val">${lot.productSku}</span></div>
+  <div class="row"><span class="lbl">ENDERECO</span><span class="val">${lot.addressCode}</span></div>
+  <div class="row"><span class="lbl">NF ENTRADA</span><span class="val">${lot.invoiceNumber}</span></div>
+  ${clientName.isNotEmpty ? '<div class="row"><span class="lbl">CLIENTE</span><span class="val">$clientName</span></div>' : ''}
+  <div class="row"><span class="lbl">QTD RECEBIDA</span><span class="val">${lot.receivedQuantity} un.</span></div>
+  <div class="row"><span class="lbl">DATA ENTRADA</span><span class="val">$dataStr</span></div>
+
+  <div class="ftr">Fulfillment Master | $dataStr</div>
+
+</div>
+<script>
+  JsBarcode("#barcode", "${lot.barcode}", {
+    format: "CODE128",
+    width: 1.6,
+    height: 55,
+    displayValue: false,
+    margin: 0,
+    background: "#ffffff",
+    lineColor: "#000000"
+  });
+  setTimeout(function() { window.print(); }, 800);
+</script>
+</body>
+</html>''';
+
+    final blob = html.Blob([htmlContent], 'text/html');
+    final url = html.Url.createObjectUrlFromBlob(blob);
+    html.window.open(url, '_blank');
+    Future.delayed(
+        const Duration(seconds: 3), () => html.Url.revokeObjectUrl(url));
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text(
+            'Etiqueta aberta em nova aba. Selecione sua impressora 58mm e clique em Imprimir.'),
+        backgroundColor: AppTheme.success,
+        duration: Duration(seconds: 5),
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -550,12 +1489,7 @@ class _LotLabelScreen extends StatelessWidget {
             child: IconButton(
               icon: const Icon(Icons.print, color: Colors.white, size: 20),
               tooltip: 'Imprimir',
-              onPressed: () => ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                  content: Text('Conecte uma impressora Bluetooth para imprimir a etiqueta.'),
-                  duration: Duration(seconds: 3),
-                ),
-              ),
+              onPressed: () => _printLabel(context),
             ),
           ),
         ],
@@ -604,16 +1538,13 @@ class _LotLabelScreen extends StatelessWidget {
                                   color: Colors.white,
                                   borderRadius: BorderRadius.circular(10),
                                 ),
-                                child: ClipRRect(
-                                  borderRadius: BorderRadius.circular(10),
-                                  child: Image.asset(
-                                    'assets/icons/app_icon.png',
-                                    fit: BoxFit.cover,
-                                    errorBuilder: (_, __, ___) => const Icon(
-                                      Icons.warehouse,
-                                      color: AppTheme.primary,
-                                      size: 24,
-                                    ),
+                                child: Image.asset(
+                                  'assets/images/ttgo_logo.png',
+                                  fit: BoxFit.contain,
+                                  errorBuilder: (_, __, ___) => const Icon(
+                                    Icons.local_shipping,
+                                    color: Colors.white,
+                                    size: 24,
                                   ),
                                 ),
                               ),
@@ -797,10 +1728,7 @@ class _LotLabelScreen extends StatelessWidget {
                         style: OutlinedButton.styleFrom(
                           padding: const EdgeInsets.symmetric(vertical: 14),
                         ),
-                        onPressed: () => ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(
-                              content: Text('Compartilhamento disponível na versão completa.')),
-                        ),
+                        onPressed: () => _printLabel(context),
                       ),
                     ),
                     const SizedBox(width: 12),
@@ -813,12 +1741,7 @@ class _LotLabelScreen extends StatelessWidget {
                           foregroundColor: Colors.white,
                           padding: const EdgeInsets.symmetric(vertical: 14),
                         ),
-                        onPressed: () => ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(
-                            content: Text('Conecte uma impressora Bluetooth para imprimir.'),
-                            backgroundColor: AppTheme.primary,
-                          ),
-                        ),
+                        onPressed: () => _printLabel(context),
                       ),
                     ),
                   ]),

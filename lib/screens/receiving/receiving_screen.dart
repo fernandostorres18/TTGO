@@ -229,7 +229,7 @@ class _NewReceivingTabState extends State<_NewReceivingTab> {
           decoration: const InputDecoration(
               labelText: 'Cliente *',
               prefixIcon: Icon(Icons.business, size: 18)),
-          value: _selectedClientId,
+          initialValue: _selectedClientId,
           items: widget.ds.activeClients
               .map((c) =>
                   DropdownMenuItem(value: c.id, child: Text(c.companyName)))
@@ -540,7 +540,7 @@ class _NewReceivingTabState extends State<_NewReceivingTab> {
                       prefixIcon: Icon(Icons.location_on,
                           size: 18, color: AppTheme.primary),
                     ),
-                    value: e.addressId,
+                    initialValue: e.addressId,
                     items: freeAddrs
                         .map((a) => DropdownMenuItem(
                               value: a.id,
@@ -900,7 +900,7 @@ class _AddProductPanelState extends State<_AddProductPanel> {
               labelText: 'Produto *',
               prefixIcon: Icon(Icons.inventory_2, size: 18),
             ),
-            value: _selectedProductId,
+            initialValue: _selectedProductId,
             hint: const Text('Selecione um produto'),
             items: widget.products.map((p) {
               final alreadyIn =

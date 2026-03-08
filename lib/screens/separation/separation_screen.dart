@@ -784,6 +784,7 @@ class _SeparationDetailScreenState extends State<_SeparationDetailScreen> {
     final productName = task.productName;
     final quantity    = task.quantity;
     final lotId       = altLotId ?? task.lotId;
+    final messenger   = ScaffoldMessenger.of(context);
 
     await widget.ds.completeTask(order.id, lotId);
 
@@ -792,8 +793,8 @@ class _SeparationDetailScreenState extends State<_SeparationDetailScreen> {
       _errorMsg = null;
     });
 
-    if (context.mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+    if (!mounted) return;
+    messenger.showSnackBar(SnackBar(
         content: Row(children: [
           const Icon(Icons.check_circle, color: Colors.white, size: 18),
           const SizedBox(width: 8),
@@ -805,7 +806,6 @@ class _SeparationDetailScreenState extends State<_SeparationDetailScreen> {
         backgroundColor: altBarcode != null ? AppTheme.warning : AppTheme.success,
         duration: const Duration(seconds: 2),
       ));
-    }
   }
 }
 

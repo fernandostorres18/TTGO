@@ -22,8 +22,38 @@ class FinancialScreen extends StatefulWidget {
 }
 
 class _FinancialScreenState extends State<FinancialScreen> {
-  int _selectedYear = DateTime.now().year;
-  int _selectedMonth = DateTime.now().month;
+  // Only month selection — generates last 12 months from today
+  late int _selectedYear;
+  late int _selectedMonth;
+
+  @override
+  void initState() {
+    super.initState();
+    _selectedYear = DateTime.now().year;
+    _selectedMonth = DateTime.now().month;
+  }
+
+  // Generate last 12 months, limited by client registration date
+  List<DateTime> _availableMonths(DataService ds) {
+    final now = DateTime.now();
+    DateTime earliest = now.subtract(const Duration(days: 365));
+
+    // If client, limit to their registration date
+    if (ds.isClient && ds.currentClientId != null) {
+      final client = ds.getClient(ds.currentClientId!);
+      if (client != null && client.createdAt.isAfter(earliest)) {
+        earliest = DateTime(client.createdAt.year, client.createdAt.month, 1);
+      }
+    }
+
+    final months = <DateTime>[];
+    var d = DateTime(now.year, now.month, 1);
+    while (!d.isBefore(earliest) && months.length < 12) {
+      months.add(d);
+      d = DateTime(d.year, d.month - 1, 1);
+    }
+    return months;
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -31,9 +61,38 @@ class _FinancialScreenState extends State<FinancialScreen> {
     final isClient = ds.isClient;
     final clientId = ds.currentClientId;
 
+    // Block operator (não bloqueia support agent — acesso somente leitura)
+    if (ds.isOperator) {
+      return Scaffold(
+        body: Column(
+          children: [
+            const GradientHeader(title: 'Financeiro', subtitle: 'Acesso restrito', showBack: true),
+            Expanded(
+              child: Center(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(Icons.lock, size: 64, color: AppTheme.error.withValues(alpha: 0.4)),
+                    const SizedBox(height: 16),
+                    const Text('Acesso não autorizado',
+                        style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: AppTheme.textSecondary)),
+                    const SizedBox(height: 8),
+                    const Text('Operadores não têm acesso ao módulo financeiro.',
+                        style: TextStyle(color: AppTheme.textHint), textAlign: TextAlign.center),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
     final targetClients = isClient
       ? [ds.getClient(clientId!)].where((c) => c != null).cast<Client>().toList()
       : ds.activeClients;
+
+    final availableMonths = _availableMonths(ds);
 
     return Scaffold(
       backgroundColor: AppTheme.surface,
@@ -44,47 +103,55 @@ class _FinancialScreenState extends State<FinancialScreen> {
             subtitle: 'Relatórios e cobranças mensais',
             showBack: true,
           ),
-          // Month/Year selector
+          // Month selector only (no year dropdown)
           Container(
             color: Colors.white,
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-            child: Row(
-              children: [
-                Expanded(
-                  child: DropdownButtonFormField<int>(
-                    decoration: const InputDecoration(labelText: 'Mês', contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 8)),
-                    value: _selectedMonth,
-                    items: List.generate(12, (i) {
-                      const months = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
-                      return DropdownMenuItem(value: i + 1, child: Text(months[i]));
+            padding: const EdgeInsets.symmetric(vertical: 10),
+            child: SizedBox(
+              height: 44,
+              child: ListView.builder(
+                scrollDirection: Axis.horizontal,
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                itemCount: availableMonths.length,
+                itemBuilder: (ctx, i) {
+                  final month = availableMonths[i];
+                  final isSelected = month.year == _selectedYear && month.month == _selectedMonth;
+                  return GestureDetector(
+                    onTap: () => setState(() {
+                      _selectedYear = month.year;
+                      _selectedMonth = month.month;
                     }),
-                    onChanged: (v) => setState(() => _selectedMonth = v!),
-                  ),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: DropdownButtonFormField<int>(
-                    decoration: const InputDecoration(labelText: 'Ano', contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 8)),
-                    value: _selectedYear,
-                    items: [DateTime.now().year, DateTime.now().year - 1, DateTime.now().year - 2]
-                      .map((y) => DropdownMenuItem(value: y, child: Text('$y'))).toList(),
-                    onChanged: (v) => setState(() => _selectedYear = v!),
-                  ),
-                ),
-              ],
+                    child: Container(
+                      margin: const EdgeInsets.only(right: 8),
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                      decoration: BoxDecoration(
+                        color: isSelected ? AppTheme.primary : AppTheme.surface,
+                        borderRadius: BorderRadius.circular(20),
+                        border: Border.all(
+                          color: isSelected ? AppTheme.primary : AppTheme.divider),
+                      ),
+                      child: Text(
+                        '${_monthLabel(month.month)}/${month.year}',
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                          color: isSelected ? Colors.white : AppTheme.textSecondary,
+                        ),
+                      ),
+                    ),
+                  );
+                },
+              ),
             ),
           ),
           Expanded(
             child: ListView(
               padding: const EdgeInsets.all(16),
               children: [
-                // Summary card
                 _buildSummaryCard(context, ds, targetClients),
                 const SizedBox(height: 16),
-                // Revenue chart
                 _buildRevenueChart(context, ds, targetClients),
                 const SizedBox(height: 16),
-                // Per client breakdown
                 ...targetClients.map((client) => _ClientBillingCard(
                   client: client,
                   ds: ds,
@@ -288,7 +355,8 @@ class _ClientBillingCardState extends State<_ClientBillingCard> {
     if (billing == null) return const SizedBox.shrink();
 
     final meetsMinimum = billing.calculatedValue >= billing.minimumMonthly;
-    final diff = billing.finalValue - billing.calculatedValue;
+    final extras = widget.ds.getBillingExtras(widget.client.id, widget.year, widget.month);
+    final extraTotal = extras.fold(0.0, (s, e) => s + e.value);
 
     return Card(
       margin: const EdgeInsets.only(bottom: 12),
@@ -297,7 +365,7 @@ class _ClientBillingCardState extends State<_ClientBillingCard> {
         title: Text(widget.client.companyName, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
         subtitle: Row(
           children: [
-            Text(formatCurrency(billing.finalValue), style: const TextStyle(fontWeight: FontWeight.bold, color: AppTheme.primary)),
+            Text(formatCurrency(billing.finalValue + extraTotal), style: const TextStyle(fontWeight: FontWeight.bold, color: AppTheme.primary)),
             const SizedBox(width: 8),
             if (!meetsMinimum) const StatusBadge(label: 'MÍNIMO APLICADO', color: AppTheme.warning),
             if (meetsMinimum) const StatusBadge(label: 'ACIMA DO MÍNIMO', color: AppTheme.success),
@@ -309,7 +377,6 @@ class _ClientBillingCardState extends State<_ClientBillingCard> {
             child: Column(
               children: [
                 const Divider(),
-                // Order breakdown
                 Row(
                   children: [
                     _orderTypeStat('Pequenos', billing.smallOrders, formatCurrency(widget.client.priceSmallOrder), Colors.teal),
@@ -322,7 +389,6 @@ class _ClientBillingCardState extends State<_ClientBillingCard> {
                   ],
                 ),
                 const SizedBox(height: 12),
-                // Calculation
                 Container(
                   padding: const EdgeInsets.all(12),
                   decoration: BoxDecoration(
@@ -334,20 +400,66 @@ class _ClientBillingCardState extends State<_ClientBillingCard> {
                       _calcRow('Subtotal calculado', formatCurrency(billing.calculatedValue)),
                       _calcRow('Mínimo contratual', formatCurrency(billing.minimumMonthly)),
                       if (!meetsMinimum)
-                        _calcRow('Acréscimo mínimo', formatCurrency(diff), color: AppTheme.warning),
+                        _calcRow('Acréscimo mínimo', formatCurrency(billing.finalValue - billing.calculatedValue), color: AppTheme.warning),
+                      // Extras/discounts
+                      if (extras.isNotEmpty) ...[
+                        const Padding(padding: EdgeInsets.symmetric(vertical: 4), child: Divider()),
+                        for (final e in extras)
+                          _calcRow(
+                            e.description,
+                            (e.value >= 0 ? '+' : '') + formatCurrency(e.value),
+                            color: e.isDiscount ? AppTheme.error : AppTheme.success,
+                          ),
+                      ],
                       const Divider(),
-                      _calcRow('TOTAL A COBRAR', formatCurrency(billing.finalValue), bold: true, color: AppTheme.primary),
+                      _calcRow('TOTAL A COBRAR', formatCurrency(billing.finalValue + extraTotal), bold: true, color: AppTheme.primary),
                     ],
                   ),
                 ),
-                const SizedBox(height: 12),
+                // Add extra / discount buttons (admin only, not support agent)
+                if (widget.ds.isAdmin && !widget.ds.isSupportAgent) ...[
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          icon: const Icon(Icons.add_circle_outline, size: 16, color: AppTheme.success),
+                          label: const Text('Adicionar Valor', style: TextStyle(fontSize: 12, color: AppTheme.success)),
+                          onPressed: () => _showExtraDialog(context, isDiscount: false),
+                          style: OutlinedButton.styleFrom(side: const BorderSide(color: AppTheme.success)),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          icon: const Icon(Icons.remove_circle_outline, size: 16, color: AppTheme.error),
+                          label: const Text('Aplicar Desconto', style: TextStyle(fontSize: 12, color: AppTheme.error)),
+                          onPressed: () => _showExtraDialog(context, isDiscount: true),
+                          style: OutlinedButton.styleFrom(side: const BorderSide(color: AppTheme.error)),
+                        ),
+                      ),
+                    ],
+                  ),
+                  if (extras.isNotEmpty) ...[
+                    const SizedBox(height: 8),
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: TextButton.icon(
+                        icon: const Icon(Icons.edit_note, size: 16, color: AppTheme.textSecondary),
+                        label: const Text('Gerenciar extras', style: TextStyle(fontSize: 12, color: AppTheme.textSecondary)),
+                        onPressed: () => _showExtrasManager(context),
+                      ),
+                    ),
+                  ],
+                ],
+                const SizedBox(height: 8),
                 Row(
                   children: [
                     Expanded(
                       child: OutlinedButton.icon(
                         icon: const Icon(Icons.picture_as_pdf, size: 16),
                         label: const Text('Exportar PDF'),
-                        onPressed: () => _exportPdf(context, billing),
+                        onPressed: () => _exportPdf(context, billing, extras),
                       ),
                     ),
                     const SizedBox(width: 8),
@@ -355,7 +467,7 @@ class _ClientBillingCardState extends State<_ClientBillingCard> {
                       child: OutlinedButton.icon(
                         icon: const Icon(Icons.table_chart, size: 16),
                         label: const Text('Exportar CSV'),
-                        onPressed: () => _exportCsv(context, billing),
+                        onPressed: () => _exportCsv(context, billing, extras),
                       ),
                     ),
                   ],
@@ -368,14 +480,130 @@ class _ClientBillingCardState extends State<_ClientBillingCard> {
     );
   }
 
+  void _showExtraDialog(BuildContext context, {required bool isDiscount}) {
+    final descCtrl = TextEditingController();
+    final valCtrl = TextEditingController();
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(isDiscount ? 'Aplicar Desconto' : 'Adicionar Valor'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: descCtrl,
+              decoration: InputDecoration(
+                labelText: isDiscount ? 'Motivo do desconto' : 'Descrição do valor',
+                prefixIcon: const Icon(Icons.description),
+              ),
+              textCapitalization: TextCapitalization.sentences,
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: valCtrl,
+              decoration: const InputDecoration(
+                labelText: 'Valor (R\$)',
+                prefixIcon: Icon(Icons.attach_money),
+                hintText: '0.00',
+              ),
+              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancelar'),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+                backgroundColor: isDiscount ? AppTheme.error : AppTheme.success),
+            onPressed: () async {
+              final desc = descCtrl.text.trim();
+              final val = double.tryParse(valCtrl.text.trim());
+              if (desc.isEmpty || val == null || val <= 0) return;
+              final extra = BillingExtra(
+                id: widget.ds.newBillingExtraId(),
+                clientId: widget.client.id,
+                year: widget.year,
+                month: widget.month,
+                description: desc,
+                value: isDiscount ? -val : val,
+                createdByUserId: widget.ds.currentUser!.id,
+                createdAt: DateTime.now(),
+              );
+              await widget.ds.addBillingExtra(extra);
+              if (ctx.mounted) Navigator.pop(ctx);
+              setState(() {});
+            },
+            child: const Text('Salvar', style: TextStyle(color: Colors.white)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showExtrasManager(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (ctx, setS) {
+            final extras = widget.ds.getBillingExtras(widget.client.id, widget.year, widget.month);
+            return AlertDialog(
+              title: const Text('Extras e Descontos'),
+              content: SizedBox(
+                width: 320,
+                child: extras.isEmpty
+                    ? const Text('Nenhum extra/desconto adicionado.')
+                    : Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: extras.map((e) => ListTile(
+                          dense: true,
+                          leading: Icon(
+                            e.isDiscount ? Icons.remove_circle : Icons.add_circle,
+                            color: e.isDiscount ? AppTheme.error : AppTheme.success,
+                            size: 20,
+                          ),
+                          title: Text(e.description, style: const TextStyle(fontSize: 13)),
+                          subtitle: Text(
+                            (e.value >= 0 ? '+' : '') + formatCurrency(e.value),
+                            style: TextStyle(
+                              color: e.isDiscount ? AppTheme.error : AppTheme.success,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          trailing: IconButton(
+                            icon: const Icon(Icons.delete, color: AppTheme.error, size: 18),
+                            onPressed: () async {
+                              await widget.ds.deleteBillingExtra(e.id);
+                              setS(() {});
+                              setState(() {});
+                            },
+                          ),
+                        )).toList(),
+                      ),
+              ),
+              actions: [
+                TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Fechar')),
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
+
   // ── nomes dos meses ────────────────────────────────────────────────────────
   static const _months = ['Janeiro','Fevereiro','Março','Abril','Maio',
     'Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
 
   // ── PDF ────────────────────────────────────────────────────────────────────
-  Future<void> _exportPdf(BuildContext context, MonthlyBilling billing) async {
+  Future<void> _exportPdf(BuildContext context, MonthlyBilling billing, List<BillingExtra> extras) async {
     final mes = '${_months[billing.month - 1]} ${billing.year}';
     final meetsMin = billing.calculatedValue >= billing.minimumMonthly;
+    final extraTotal = extras.fold(0.0, (s, e) => s + e.value);
+    final totalFinal = billing.finalValue + extraTotal;
 
     final doc = pw.Document();
     doc.addPage(pw.Page(
@@ -385,7 +613,6 @@ class _ClientBillingCardState extends State<_ClientBillingCard> {
         return pw.Column(
           crossAxisAlignment: pw.CrossAxisAlignment.start,
           children: [
-            // Cabeçalho
             pw.Container(
               width: double.infinity,
               padding: const pw.EdgeInsets.all(16),
@@ -397,27 +624,19 @@ class _ClientBillingCardState extends State<_ClientBillingCard> {
                 crossAxisAlignment: pw.CrossAxisAlignment.start,
                 children: [
                   pw.Text('RELATÓRIO DE FATURAMENTO',
-                      style: pw.TextStyle(color: PdfColors.white, fontSize: 16,
-                          fontWeight: pw.FontWeight.bold)),
+                      style: pw.TextStyle(color: PdfColors.white, fontSize: 16, fontWeight: pw.FontWeight.bold)),
                   pw.SizedBox(height: 4),
-                  pw.Text(mes,
-                      style: pw.TextStyle(color: PdfColors.white, fontSize: 12)),
+                  pw.Text(mes, style: pw.TextStyle(color: PdfColors.white, fontSize: 12)),
                 ],
               ),
             ),
             pw.SizedBox(height: 20),
-
-            // Cliente
             pw.Text('Cliente', style: pw.TextStyle(fontSize: 10, color: PdfColors.grey600)),
-            pw.Text(billing.clientName,
-                style: pw.TextStyle(fontSize: 14, fontWeight: pw.FontWeight.bold)),
+            pw.Text(billing.clientName, style: pw.TextStyle(fontSize: 14, fontWeight: pw.FontWeight.bold)),
             pw.SizedBox(height: 16),
             pw.Divider(),
             pw.SizedBox(height: 12),
-
-            // Breakdown de pedidos
-            pw.Text('Pedidos por Tipo',
-                style: pw.TextStyle(fontSize: 12, fontWeight: pw.FontWeight.bold)),
+            pw.Text('Pedidos por Tipo', style: pw.TextStyle(fontSize: 12, fontWeight: pw.FontWeight.bold)),
             pw.SizedBox(height: 8),
             pw.Table(
               border: pw.TableBorder.all(color: PdfColors.grey300, width: 0.5),
@@ -430,56 +649,29 @@ class _ClientBillingCardState extends State<_ClientBillingCard> {
               children: [
                 pw.TableRow(
                   decoration: const pw.BoxDecoration(color: PdfColors.grey100),
-                  children: [
-                    _pdfCell('Tipo', bold: true),
-                    _pdfCell('Qtd', bold: true),
-                    _pdfCell('Preço Unit.', bold: true),
-                    _pdfCell('Subtotal', bold: true),
-                  ],
+                  children: [_pdfCell('Tipo', bold: true), _pdfCell('Qtd', bold: true), _pdfCell('Preço Unit.', bold: true), _pdfCell('Subtotal', bold: true)],
                 ),
-                pw.TableRow(children: [
-                  _pdfCell('Caixa Pequena'),
-                  _pdfCell('${billing.smallOrders}'),
-                  _pdfCell(formatCurrency(widget.client.priceSmallOrder)),
-                  _pdfCell(formatCurrency(billing.smallOrders * widget.client.priceSmallOrder)),
-                ]),
-                pw.TableRow(children: [
-                  _pdfCell('Caixa Média'),
-                  _pdfCell('${billing.mediumOrders}'),
-                  _pdfCell(formatCurrency(widget.client.priceMediumOrder)),
-                  _pdfCell(formatCurrency(billing.mediumOrders * widget.client.priceMediumOrder)),
-                ]),
-                pw.TableRow(children: [
-                  _pdfCell('Caixa Grande'),
-                  _pdfCell('${billing.largeOrders}'),
-                  _pdfCell(formatCurrency(widget.client.priceLargeOrder)),
-                  _pdfCell(formatCurrency(billing.largeOrders * widget.client.priceLargeOrder)),
-                ]),
-                pw.TableRow(children: [
-                  _pdfCell('Envelope'),
-                  _pdfCell('${billing.envelopeOrders}'),
-                  _pdfCell(formatCurrency(widget.client.priceEnvelopeOrder)),
-                  _pdfCell(formatCurrency(billing.envelopeOrders * widget.client.priceEnvelopeOrder)),
-                ]),
+                pw.TableRow(children: [_pdfCell('Caixa Pequena'), _pdfCell('${billing.smallOrders}'), _pdfCell(formatCurrency(widget.client.priceSmallOrder)), _pdfCell(formatCurrency(billing.smallOrders * widget.client.priceSmallOrder))]),
+                pw.TableRow(children: [_pdfCell('Caixa Média'), _pdfCell('${billing.mediumOrders}'), _pdfCell(formatCurrency(widget.client.priceMediumOrder)), _pdfCell(formatCurrency(billing.mediumOrders * widget.client.priceMediumOrder))]),
+                pw.TableRow(children: [_pdfCell('Caixa Grande'), _pdfCell('${billing.largeOrders}'), _pdfCell(formatCurrency(widget.client.priceLargeOrder)), _pdfCell(formatCurrency(billing.largeOrders * widget.client.priceLargeOrder))]),
+                pw.TableRow(children: [_pdfCell('Envelope'), _pdfCell('${billing.envelopeOrders}'), _pdfCell(formatCurrency(widget.client.priceEnvelopeOrder)), _pdfCell(formatCurrency(billing.envelopeOrders * widget.client.priceEnvelopeOrder))]),
               ],
             ),
             pw.SizedBox(height: 16),
-
-            // Resumo financeiro
-            pw.Text('Resumo Financeiro',
-                style: pw.TextStyle(fontSize: 12, fontWeight: pw.FontWeight.bold)),
+            pw.Text('Resumo Financeiro', style: pw.TextStyle(fontSize: 12, fontWeight: pw.FontWeight.bold)),
             pw.SizedBox(height: 8),
             _pdfRow('Subtotal calculado', formatCurrency(billing.calculatedValue)),
             _pdfRow('Mínimo contratual', formatCurrency(billing.minimumMonthly)),
-            if (!meetsMin)
-              _pdfRow('Acréscimo mínimo',
-                  formatCurrency(billing.finalValue - billing.calculatedValue),
-                  highlight: true),
+            if (!meetsMin) _pdfRow('Acréscimo mínimo', formatCurrency(billing.finalValue - billing.calculatedValue), highlight: true),
+            if (extras.isNotEmpty) ...[
+              pw.Divider(color: PdfColors.grey300),
+              for (final e in extras)
+                _pdfRow(e.description, (e.value >= 0 ? '+' : '') + formatCurrency(e.value),
+                    highlight: e.isDiscount),
+            ],
             pw.Divider(color: PdfColors.grey400),
-            _pdfRow('TOTAL A COBRAR', formatCurrency(billing.finalValue), bold: true),
+            _pdfRow('TOTAL A COBRAR', formatCurrency(totalFinal), bold: true),
             pw.SizedBox(height: 24),
-
-            // Rodapé
             pw.Text(
               'Gerado em ${DateTime.now().day.toString().padLeft(2,'0')}/'
               '${DateTime.now().month.toString().padLeft(2,'0')}/'
@@ -513,88 +705,62 @@ class _ClientBillingCardState extends State<_ClientBillingCard> {
 
   pw.Widget _pdfCell(String text, {bool bold = false}) => pw.Padding(
     padding: const pw.EdgeInsets.all(6),
-    child: pw.Text(text,
-        style: pw.TextStyle(
-            fontSize: 10,
-            fontWeight: bold ? pw.FontWeight.bold : pw.FontWeight.normal)),
+    child: pw.Text(text, style: pw.TextStyle(fontSize: 10, fontWeight: bold ? pw.FontWeight.bold : pw.FontWeight.normal)),
   );
 
-  pw.Widget _pdfRow(String label, String value,
-      {bool bold = false, bool highlight = false}) =>
+  pw.Widget _pdfRow(String label, String value, {bool bold = false, bool highlight = false}) =>
     pw.Padding(
       padding: const pw.EdgeInsets.symmetric(vertical: 3),
       child: pw.Row(
         mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
         children: [
-          pw.Text(label,
-              style: pw.TextStyle(
-                  fontSize: 11,
-                  fontWeight: bold ? pw.FontWeight.bold : pw.FontWeight.normal,
-                  color: highlight ? PdfColors.orange700 : PdfColors.black)),
-          pw.Text(value,
-              style: pw.TextStyle(
-                  fontSize: 11,
-                  fontWeight: bold ? pw.FontWeight.bold : pw.FontWeight.normal,
-                  color: bold
-                      ? PdfColor.fromHex('7B1FA2')
-                      : highlight
-                          ? PdfColors.orange700
-                          : PdfColors.black)),
+          pw.Text(label, style: pw.TextStyle(fontSize: 11, fontWeight: bold ? pw.FontWeight.bold : pw.FontWeight.normal, color: highlight ? PdfColors.orange700 : PdfColors.black)),
+          pw.Text(value, style: pw.TextStyle(fontSize: 11, fontWeight: bold ? pw.FontWeight.bold : pw.FontWeight.normal, color: bold ? PdfColor.fromHex('7B1FA2') : highlight ? PdfColors.orange700 : PdfColors.black)),
         ],
       ),
     );
 
   // ── CSV ────────────────────────────────────────────────────────────────────
-  void _exportCsv(BuildContext context, MonthlyBilling billing) {
+  void _exportCsv(BuildContext context, MonthlyBilling billing, List<BillingExtra> extras) {
     final mes = '${_months[billing.month - 1]} ${billing.year}';
+    final extraTotal = extras.fold(0.0, (s, e) => s + e.value);
     final rows = <List<dynamic>>[
       ['RELATÓRIO DE FATURAMENTO — $mes'],
       [],
       ['Cliente', billing.clientName],
       [],
       ['Tipo', 'Quantidade', 'Preço Unitário (R\$)', 'Subtotal (R\$)'],
-      ['Caixa Pequena', billing.smallOrders,
-        widget.client.priceSmallOrder,
-        billing.smallOrders * widget.client.priceSmallOrder],
-      ['Caixa Média', billing.mediumOrders,
-        widget.client.priceMediumOrder,
-        billing.mediumOrders * widget.client.priceMediumOrder],
-      ['Caixa Grande', billing.largeOrders,
-        widget.client.priceLargeOrder,
-        billing.largeOrders * widget.client.priceLargeOrder],
-      ['Envelope', billing.envelopeOrders,
-        widget.client.priceEnvelopeOrder,
-        billing.envelopeOrders * widget.client.priceEnvelopeOrder],
+      ['Caixa Pequena', billing.smallOrders, widget.client.priceSmallOrder, billing.smallOrders * widget.client.priceSmallOrder],
+      ['Caixa Média', billing.mediumOrders, widget.client.priceMediumOrder, billing.mediumOrders * widget.client.priceMediumOrder],
+      ['Caixa Grande', billing.largeOrders, widget.client.priceLargeOrder, billing.largeOrders * widget.client.priceLargeOrder],
+      ['Envelope', billing.envelopeOrders, widget.client.priceEnvelopeOrder, billing.envelopeOrders * widget.client.priceEnvelopeOrder],
       [],
       ['Subtotal calculado', '', '', billing.calculatedValue],
       ['Mínimo contratual', '', '', billing.minimumMonthly],
-      if (billing.calculatedValue < billing.minimumMonthly)
-        ['Acréscimo mínimo', '', '', billing.finalValue - billing.calculatedValue],
-      ['TOTAL A COBRAR', '', '', billing.finalValue],
+      if (billing.calculatedValue < billing.minimumMonthly) ['Acréscimo mínimo', '', '', billing.finalValue - billing.calculatedValue],
+      if (extras.isNotEmpty) ...[
+        [],
+        ['Extras / Descontos', '', '', ''],
+        for (final e in extras) [e.description, '', '', e.value],
+      ],
       [],
-      ['Gerado em', '${DateTime.now().day.toString().padLeft(2,'0')}/'
-          '${DateTime.now().month.toString().padLeft(2,'0')}/'
-          '${DateTime.now().year}'],
+      ['TOTAL A COBRAR', '', '', billing.finalValue + extraTotal],
+      [],
+      ['Gerado em', '${DateTime.now().day.toString().padLeft(2,'0')}/${DateTime.now().month.toString().padLeft(2,'0')}/${DateTime.now().year}'],
     ];
 
     final csv = const ListToCsvConverter().convert(rows);
-    final filename = 'faturamento_${billing.clientName.replaceAll(' ', '_')}_'
-        '${billing.month.toString().padLeft(2,'0')}_${billing.year}.csv';
-
-    final bytes = Uint8List.fromList(
-        '\uFEFF$csv'.codeUnits); // BOM para Excel reconhecer UTF-8
+    final filename = 'faturamento_${billing.clientName.replaceAll(' ', '_')}_${billing.month.toString().padLeft(2,'0')}_${billing.year}.csv';
+    final bytes = Uint8List.fromList('\uFEFF$csv'.codeUnits);
     final blob = html.Blob([bytes], 'text/csv;charset=utf-8');
     final url = html.Url.createObjectUrlFromBlob(blob);
     html.AnchorElement(href: url)
       ..setAttribute('download', filename)
       ..click();
     html.Url.revokeObjectUrl(url);
-
     if (context.mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-            content: Text('CSV "$filename" baixado! Abra com Excel ou Google Sheets.'),
-            backgroundColor: AppTheme.success));
+        SnackBar(content: Text('CSV "$filename" baixado!'), backgroundColor: AppTheme.success));
     }
   }
 
