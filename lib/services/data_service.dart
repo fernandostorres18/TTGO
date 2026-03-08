@@ -45,7 +45,13 @@ class DataService extends ChangeNotifier {
         notifyListeners();
       }, onError: (_) {}));
     }
-    listen('users',        AppUser.fromMap,         (v) => _users = v);
+    listen('users',        AppUser.fromMap,         (v) {
+      _users = v;
+      // Resolve o completer quando chegarem usuários via stream
+      if (v.isNotEmpty && !(_usersReadyCompleter?.isCompleted ?? true)) {
+        _usersReadyCompleter!.complete();
+      }
+    });
     listen('clients',      Client.fromMap,           (v) => _clients = v);
     listen('products',     Product.fromMap,          (v) => _products = v);
     listen('addresses',    WarehouseAddress.fromMap, (v) => _addresses = v);
@@ -100,18 +106,41 @@ class DataService extends ChangeNotifier {
   // Filtered getters for current client
   String? get currentClientId => isClient ? _currentUser?.clientId : null;
 
+  // Flag: true enquanto o primeiro carregamento do Firestore não terminou
+  bool _initializing = true;
+  bool get isInitializing => _initializing;
+
+  // Completer que resolve quando _users tiver pelo menos 1 elemento
+  Completer<void>? _usersReadyCompleter;
+
   Future<void> initialize() async {
     _prefs = await SharedPreferences.getInstance();
+    _usersReadyCompleter = Completer<void>();
 
-    // Carrega dados iniciais do Firestore (one-shot)
-    await _loadAll();
+    // Inicia listeners em tempo real imediatamente
+    startAutoRefresh();
 
-    if (_users.isEmpty) {
-      await _seedDemoData();
+    // Tenta carregar dados iniciais com timeout de 10s
+    try {
+      await _loadAll().timeout(const Duration(seconds: 10));
+    } catch (_) {
+      // Timeout ou erro: continua mesmo assim, streams vão popular os dados
     }
 
-    // Inicia listeners em tempo real (Firestore streams)
-    startAutoRefresh();
+    if (_users.isEmpty) {
+      // Seed só se realmente não veio nada do Firestore
+      try {
+        await _seedDemoData();
+      } catch (_) {}
+    }
+
+    // Resolve o completer — usuários prontos
+    if (!(_usersReadyCompleter?.isCompleted ?? true)) {
+      _usersReadyCompleter!.complete();
+    }
+
+    _initializing = false;
+    notifyListeners();
   }
 
   // ─── PERSISTENCE ─────────────────────────────────────────────────────────
@@ -638,6 +667,16 @@ class DataService extends ChangeNotifier {
   // ─── AUTH ─────────────────────────────────────────────────────────────────
 
   Future<bool> login(String email, String password) async {
+    // Se ainda inicializando, aguarda os dados chegarem (máx 15s)
+    if (_initializing) {
+      try {
+        await (_usersReadyCompleter?.future ??
+            Future.delayed(const Duration(seconds: 2)))
+            .timeout(const Duration(seconds: 15));
+      } catch (_) {
+        // Timeout: tenta mesmo assim com o que tiver
+      }
+    }
     final user = _users.where((u) =>
       u.email.toLowerCase() == email.toLowerCase() &&
       u.password == password &&
