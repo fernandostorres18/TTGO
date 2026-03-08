@@ -1,11 +1,10 @@
 // lib/services/data_service.dart
-// Serviço central de dados com Hive
+// Serviço central de dados — Firestore (nuvem) + SharedPreferences (sessão local)
 
 import 'dart:async';
 import 'dart:convert';
+import 'package:cloud_firestore/cloud_firestore.dart' hide Order;
 import 'package:flutter/foundation.dart';
-// ignore: avoid_web_libraries_in_flutter
-import 'dart:html' as html show window, EventListener;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:uuid/uuid.dart';
 import '../models/app_models.dart';
@@ -15,81 +14,62 @@ class DataService extends ChangeNotifier {
   factory DataService() => _instance;
   DataService._internal();
 
-  late SharedPreferences _prefs;
+  late SharedPreferences _prefs;  // apenas para sessão (usuário logado)
   final _uuid = const Uuid();
+  final _db = FirebaseFirestore.instance;
 
-  // Timer de sync entre abas: recarrega tickets do storage a cada 2s
-  Timer? _autoRefreshTimer;
-  html.EventListener? _storageListener;
+  // Listeners em tempo real do Firestore — atualizam a UI automaticamente
+  final List<StreamSubscription> _subs = [];
 
   void startAutoRefresh() {
-    _autoRefreshTimer?.cancel();
-    // Recarrega TUDO do localStorage a cada 3s (sincroniza entre abas)
-    _autoRefreshTimer = Timer.periodic(const Duration(seconds: 3), (_) async {
-      await _reloadAll();
-    });
-    // Listener imediato: outra aba salvou → recarrega na hora
-    _storageListener = (dynamic event) async {
-      await _reloadAll();
-    };
-    html.window.addEventListener('storage', _storageListener!);
+    // Firestore já envia atualizações em tempo real via streams.
+    // Apenas iniciamos os listeners se ainda não estiverem ativos.
+    if (_subs.isNotEmpty) return;
+    _listenAll();
   }
 
   void stopAutoRefresh() {
-    _autoRefreshTimer?.cancel();
-    _autoRefreshTimer = null;
-    if (_storageListener != null) {
-      html.window.removeEventListener('storage', _storageListener!);
-      _storageListener = null;
-    }
+    for (final s in _subs) { s.cancel(); }
+    _subs.clear();
   }
 
-  // Gera um hash leve de conteúdo para detectar qualquer mudança nos dados
-  String _contentHash() {
-    final ordersH  = _orders.map((o) => '${o.id}:${o.status.name}:${o.updatedAt?.millisecondsSinceEpoch ?? 0}').join('|');
-    final lotsH    = _lots.map((l) => '${l.id}:${l.currentQuantity}:${l.addressCode}').join('|');
-    final ticketsH = _tickets.map((t) => '${t.id}:${t.messages.length}:${t.status.name}').join('|');
-    final notifsH  = _notifications.map((n) => '${n.id}:${n.isRead}').join('|');
-    final recvH    = _receivings.map((r) => '${r.id}:${r.isCompleted}').join('|');
-    final prodsH   = _products.map((p) => '${p.id}:${p.isActive}').join('|');
-    final bilsH    = _billings.map((b) => '${b.id}:${b.finalValue}:${b.isPaid}').join('|');
-    final addrH    = _addresses.map((a) => '${a.id}:${a.isOccupied}').join('|');
-    return '$ordersH||$lotsH||$ticketsH||$notifsH||$recvH||$prodsH||$bilsH||$addrH';
-  }
-
-  // Recarrega todos os dados do storage e notifica se houve qualquer mudança
-  Future<void> _reloadAll() async {
-    await _prefs.reload();
-
-    // Snapshot do estado atual para detectar qualquer mudança de conteúdo
-    final prevHash = _contentHash();
-
-    // Recarregar todas as coleções
-    _users         = _loadList('users',         AppUser.fromMap);
-    _clients       = _loadList('clients',        Client.fromMap);
-    _products      = _loadList('products',       Product.fromMap);
-    _addresses     = _loadList('addresses',      WarehouseAddress.fromMap);
-    _lots          = _loadList('lots',           Lot.fromMap);
-    _orders        = _loadList('orders',         Order.fromMap);
-    _receivings    = _loadList('receivings',     ReceivingRecord.fromMap);
-    _billings      = _loadList('billings',       MonthlyBilling.fromMap);
-    _notifications = _loadList('notifications',  AppNotification.fromMap);
-    _packageTypes  = _loadList('packageTypes',   PackageType.fromMap);
-    _tickets       = _loadList('tickets',        SupportTicket.fromMap);
-    _billingExtras = _loadList('billingExtras',  BillingExtra.fromMap);
-
-    // Notifica se qualquer dado mudou (quantidades, status, endereços, etc.)
-    if (_contentHash() != prevHash) {
-      notifyListeners();
+  // Conecta listeners em tempo real para todas as coleções
+  void _listenAll() {
+    void listen<T>(String col, T Function(Map<String,dynamic>) from, void Function(List<T>) set) {
+      _subs.add(_db.collection(col).snapshots().listen((snap) {
+        set(snap.docs.map((d) {
+          final data = Map<String,dynamic>.from(d.data());
+          data['id'] = d.id;
+          return from(data);
+        }).toList());
+        notifyListeners();
+      }, onError: (_) {}));
     }
+    listen('users',        AppUser.fromMap,         (v) => _users = v);
+    listen('clients',      Client.fromMap,           (v) => _clients = v);
+    listen('products',     Product.fromMap,          (v) => _products = v);
+    listen('addresses',    WarehouseAddress.fromMap, (v) => _addresses = v);
+    listen('lots',         Lot.fromMap,              (v) => _lots = v);
+    listen('orders',       Order.fromMap,            (v) => _orders = v);
+    listen('receivings',   ReceivingRecord.fromMap,  (v) => _receivings = v);
+    listen('billings',     MonthlyBilling.fromMap,   (v) => _billings = v);
+    listen('notifications',AppNotification.fromMap,  (v) => _notifications = v);
+    listen('packageTypes', PackageType.fromMap,      (v) => _packageTypes = v);
+    listen('tickets',      SupportTicket.fromMap,    (v) => _tickets = v);
+    listen('billingExtras',BillingExtra.fromMap,     (v) => _billingExtras = v);
+    listen('archivedOrders',Order.fromMap,           (v) => _archivedOrders = v);
+    _db.collection('settings').doc('support').snapshots().listen((snap) {
+      if (snap.exists) {
+        try { _supportSettings = SupportSettings.fromMap(
+          Map<String,dynamic>.from(snap.data()!)); } catch(_) {}
+        notifyListeners();
+      }
+    }, onError: (_) {});
   }
 
   @override
   void dispose() {
-    _autoRefreshTimer?.cancel();
-    if (_storageListener != null) {
-      html.window.removeEventListener('storage', _storageListener!);
-    }
+    stopAutoRefresh();
     super.dispose();
   }
 
@@ -122,17 +102,15 @@ class DataService extends ChangeNotifier {
 
   Future<void> initialize() async {
     _prefs = await SharedPreferences.getInstance();
+
+    // Carrega dados iniciais do Firestore (one-shot)
     await _loadAll();
-    await _loadArchived();
+
     if (_users.isEmpty) {
       await _seedDemoData();
-    } else {
-      // Migração: gerar separationTasks para pedidos que não têm
-      await _migrateMissingSeparationTasks();
-      // Migração: garantir tickets de chat demo para testes
-      await _migrateDemoChatTickets();
     }
-    // Inicia auto-refresh para mensagens em tempo real
+
+    // Inicia listeners em tempo real (Firestore streams)
     startAutoRefresh();
   }
 
@@ -175,7 +153,7 @@ class DataService extends ChangeNotifier {
       }
     }
     if (changed) {
-      await _saveList('orders', _orders, (o) => o.toMap());
+      await _saveCollection('orders', _orders, (o) => o.toMap(), (o) => o.id);
     }
   }
 
@@ -187,7 +165,7 @@ class DataService extends ChangeNotifier {
         id: 'user-agent1', name: 'Ana Atendente', email: 'atendente@fulfillment.com',
         password: '123456', role: UserRole.supportAgent, createdAt: DateTime.now(),
       ));
-      await _saveList('users', _users, (u) => u.toMap());
+      await _saveCollection('users', _users, (u) => u.toMap(), (u) => u.id);
     }
 
     final hasDemo = _tickets.any((t) => t.id == 'ticket-demo-1');
@@ -265,64 +243,93 @@ class DataService extends ChangeNotifier {
       ));
     }
 
-    await _saveList('tickets', _tickets, (t) => t.toMap());
+    await _saveCollection('tickets', _tickets, (t) => t.toMap(), (t) => t.id);
     notifyListeners();
   }
 
+  // Carrega todas as coleções do Firestore de uma vez (one-shot para inicialização)
   Future<void> _loadAll() async {
-    _users = _loadList('users', AppUser.fromMap);
-    _clients = _loadList('clients', Client.fromMap);
-    _products = _loadList('products', Product.fromMap);
-    _addresses = _loadList('addresses', WarehouseAddress.fromMap);
-    _lots = _loadList('lots', Lot.fromMap);
-    _orders = _loadList('orders', Order.fromMap);
-    _receivings = _loadList('receivings', ReceivingRecord.fromMap);
-    _billings = _loadList('billings', MonthlyBilling.fromMap);
-    _notifications = _loadList('notifications', AppNotification.fromMap);
-    _packageTypes = _loadList('packageTypes', PackageType.fromMap);
-    _tickets = _loadList('tickets', SupportTicket.fromMap);
-    _billingExtras = _loadList('billingExtras', BillingExtra.fromMap);
-    final settingsRaw = _prefs.getString('supportSettings');
-    if (settingsRaw != null) {
+    Future<List<T>> fetch<T>(String col, T Function(Map<String,dynamic>) from) async {
       try {
-        _supportSettings = SupportSettings.fromMap(
-          Map<String, dynamic>.from(jsonDecode(settingsRaw)));
-      } catch (_) {}
+        final snap = await _db.collection(col).get();
+        return snap.docs.map((d) {
+          final data = Map<String,dynamic>.from(d.data());
+          data['id'] = d.id;
+          return from(data);
+        }).toList();
+      } catch (_) { return []; }
     }
-    // Seed default package types if empty
+    _users         = await fetch('users',         AppUser.fromMap);
+    _clients       = await fetch('clients',        Client.fromMap);
+    _products      = await fetch('products',       Product.fromMap);
+    _addresses     = await fetch('addresses',      WarehouseAddress.fromMap);
+    _lots          = await fetch('lots',           Lot.fromMap);
+    _orders        = await fetch('orders',         Order.fromMap);
+    _receivings    = await fetch('receivings',     ReceivingRecord.fromMap);
+    _billings      = await fetch('billings',       MonthlyBilling.fromMap);
+    _notifications = await fetch('notifications',  AppNotification.fromMap);
+    _packageTypes  = await fetch('packageTypes',   PackageType.fromMap);
+    _tickets       = await fetch('tickets',        SupportTicket.fromMap);
+    _billingExtras = await fetch('billingExtras',  BillingExtra.fromMap);
+    _archivedOrders = await fetch('archivedOrders', Order.fromMap);
+    // Support settings
+    try {
+      final snap = await _db.collection('settings').doc('support').get();
+      if (snap.exists) {
+        _supportSettings = SupportSettings.fromMap(Map<String,dynamic>.from(snap.data()!));
+      }
+    } catch (_) {}
     if (_packageTypes.isEmpty) _seedPackageTypes();
   }
 
-  List<T> _loadList<T>(String key, T Function(Map<String, dynamic>) fromMap) {
-    final raw = _prefs.getString(key);
-    if (raw == null) return [];
-    try {
-      final list = jsonDecode(raw) as List;
-      return list.map((e) => fromMap(Map<String, dynamic>.from(e))).toList();
-    } catch (_) {
-      return [];
+  // Salva UM documento no Firestore
+  Future<void> _saveDoc(String collection, String id, Map<String,dynamic> data) async {
+    data.remove('id'); // Firestore usa o ID do documento, não um campo
+    await _db.collection(collection).doc(id).set(data);
+  }
+
+  // Deleta UM documento no Firestore
+  Future<void> _deleteDoc(String collection, String id) async {
+    await _db.collection(collection).doc(id).delete();
+  }
+
+  // Salva toda uma coleção no Firestore (útil após operações em lote)
+  Future<void> _saveCollection<T>(
+      String col, List<T> list, Map<String,dynamic> Function(T) toMap, String Function(T) getId) async {
+    for (final item in list) {
+      await _saveDoc(col, getId(item), toMap(item));
     }
   }
 
-  Future<void> _saveList<T>(String key, List<T> list, Map<String, dynamic> Function(T) toMap) async {
-    await _prefs.setString(key, jsonEncode(list.map(toMap).toList()));
-  }
-
+  // Salva lista inteira (usado apenas no seed inicial)
   Future<void> _saveAll() async {
-    await Future.wait([
-      _saveList('users', _users, (u) => u.toMap()),
-      _saveList('clients', _clients, (c) => c.toMap()),
-      _saveList('products', _products, (p) => p.toMap()),
-      _saveList('addresses', _addresses, (a) => a.toMap()),
-      _saveList('lots', _lots, (l) => l.toMap()),
-      _saveList('orders', _orders, (o) => o.toMap()),
-      _saveList('receivings', _receivings, (r) => r.toMap()),
-      _saveList('billings', _billings, (b) => b.toMap()),
-      _saveList('notifications', _notifications, (n) => n.toMap()),
-      _saveList('packageTypes', _packageTypes, (pt) => pt.toMap()),
-      _saveList('tickets', _tickets, (t) => t.toMap()),
-      _saveList('billingExtras', _billingExtras, (be) => be.toMap()),
-    ]);
+    final batch = _db.batch();
+    void batchList<T>(String col, List<T> list, Map<String,dynamic> Function(T) toMap, String Function(T) getId) {
+      for (final item in list) {
+        final data = toMap(item);
+        final id = getId(item);
+        data.remove('id');
+        batch.set(_db.collection(col).doc(id), data);
+      }
+    }
+    batchList('users',         _users,         (u) => u.toMap(), (u) => u.id);
+    batchList('clients',       _clients,        (c) => c.toMap(), (c) => c.id);
+    batchList('products',      _products,       (p) => p.toMap(), (p) => p.id);
+    batchList('addresses',     _addresses,      (a) => a.toMap(), (a) => a.id);
+    batchList('lots',          _lots,           (l) => l.toMap(), (l) => l.id);
+    batchList('orders',        _orders,         (o) => o.toMap(), (o) => o.id);
+    batchList('receivings',    _receivings,     (r) => r.toMap(), (r) => r.id);
+    batchList('billings',      _billings,       (b) => b.toMap(), (b) => b.id);
+    batchList('notifications', _notifications,  (n) => n.toMap(), (n) => n.id);
+    batchList('packageTypes',  _packageTypes,   (pt) => pt.toMap(), (pt) => pt.id);
+    batchList('tickets',       _tickets,        (t) => t.toMap(), (t) => t.id);
+    batchList('billingExtras', _billingExtras,  (be) => be.toMap(), (be) => be.id);
+    // Salvar em lotes de 500 (limite do Firestore)
+    await batch.commit();
+    // Support settings
+    final settingsData = _supportSettings.toMap();
+    settingsData.remove('id');
+    await _db.collection('settings').doc('support').set(settingsData);
   }
 
   void _seedPackageTypes() {
@@ -658,7 +665,7 @@ class DataService extends ChangeNotifier {
 
   Future<void> addClient(Client client) async {
     _clients.add(client);
-    await _saveList('clients', _clients, (c) => c.toMap());
+    await _saveCollection('clients', _clients, (c) => c.toMap(), (c) => c.id);
     notifyListeners();
   }
 
@@ -666,7 +673,7 @@ class DataService extends ChangeNotifier {
     final idx = _clients.indexWhere((c) => c.id == client.id);
     if (idx >= 0) {
       _clients[idx] = client;
-      await _saveList('clients', _clients, (c) => c.toMap());
+      await _saveCollection('clients', _clients, (c) => c.toMap(), (c) => c.id);
       notifyListeners();
     }
   }
@@ -676,13 +683,14 @@ class DataService extends ChangeNotifier {
     final hasActiveOrders = _orders.any((o) =>
       o.clientId == clientId && o.status != OrderStatus.finalizado);
     if (hasActiveOrders) return false; // não permite exclusão
+    await _deleteDoc('clients', clientId);
     _clients.removeWhere((c) => c.id == clientId);
     // Remove produtos e lotes associados (soft: apenas marca inativo)
     for (final p in _products.where((p) => p.clientId == clientId)) {
       p.isActive = false;
     }
-    await _saveList('clients', _clients, (c) => c.toMap());
-    await _saveList('products', _products, (p) => p.toMap());
+    await _saveCollection('clients', _clients, (c) => c.toMap(), (c) => c.id);
+    await _saveCollection('products', _products, (p) => p.toMap(), (p) => p.id);
     notifyListeners();
     return true;
   }
@@ -730,7 +738,7 @@ class DataService extends ChangeNotifier {
 
   Future<void> addProduct(Product product) async {
     _products.add(product);
-    await _saveList('products', _products, (p) => p.toMap());
+    await _saveCollection('products', _products, (p) => p.toMap(), (p) => p.id);
     notifyListeners();
   }
 
@@ -738,7 +746,7 @@ class DataService extends ChangeNotifier {
     final idx = _products.indexWhere((p) => p.id == product.id);
     if (idx >= 0) {
       _products[idx] = product;
-      await _saveList('products', _products, (p) => p.toMap());
+      await _saveCollection('products', _products, (p) => p.toMap(), (p) => p.id);
       notifyListeners();
     }
   }
@@ -748,8 +756,9 @@ class DataService extends ChangeNotifier {
     final hasActiveLots = _lots.any((l) =>
         l.productId == productId && l.isActive && l.currentQuantity > 0);
     if (hasActiveLots) return false;
+    await _deleteDoc('products', productId);
     _products.removeWhere((p) => p.id == productId);
-    await _saveList('products', _products, (p) => p.toMap());
+    await _saveCollection('products', _products, (p) => p.toMap(), (p) => p.id);
     notifyListeners();
     return true;
   }
@@ -771,7 +780,7 @@ class DataService extends ChangeNotifier {
 
   Future<void> addAddress(WarehouseAddress address) async {
     _addresses.add(address);
-    await _saveList('addresses', _addresses, (a) => a.toMap());
+    await _saveCollection('addresses', _addresses, (a) => a.toMap(), (a) => a.id);
     notifyListeners();
   }
 
@@ -779,7 +788,7 @@ class DataService extends ChangeNotifier {
     final idx = _addresses.indexWhere((a) => a.id == address.id);
     if (idx >= 0) {
       _addresses[idx] = address;
-      await _saveList('addresses', _addresses, (a) => a.toMap());
+      await _saveCollection('addresses', _addresses, (a) => a.toMap(), (a) => a.id);
       notifyListeners();
     }
   }
@@ -1088,7 +1097,7 @@ class DataService extends ChangeNotifier {
       ],
     );
     _orders.add(order);
-    await _saveList('orders', _orders, (o) => o.toMap());
+    await _saveCollection('orders', _orders, (o) => o.toMap(), (o) => o.id);
 
     // Notificar admins e operadores sobre novo pedido
     await _notifyAdminsAndOperators(
@@ -1172,7 +1181,7 @@ class DataService extends ChangeNotifier {
         ));
       }
 
-      await _saveList('orders', _orders, (o) => o.toMap());
+      await _saveCollection('orders', _orders, (o) => o.toMap(), (o) => o.id);
 
       // Notificar cliente sobre atualização do pedido
       await _notifyClientUsers(
@@ -1196,7 +1205,7 @@ class DataService extends ChangeNotifier {
     _orders[idx].separationTasks[taskIdx].isCompleted = true;
     _orders[idx].separationTasks[taskIdx].addressScanned = true;
     _orders[idx].separationTasks[taskIdx].lotScanned = true;
-    await _saveList('orders', _orders, (o) => o.toMap());
+    await _saveCollection('orders', _orders, (o) => o.toMap(), (o) => o.id);
     notifyListeners();
   }
 
@@ -1220,7 +1229,7 @@ class DataService extends ChangeNotifier {
 
   Future<void> addReceiving(ReceivingRecord record) async {
     _receivings.add(record);
-    await _saveList('receivings', _receivings, (r) => r.toMap());
+    await _saveCollection('receivings', _receivings, (r) => r.toMap(), (r) => r.id);
     notifyListeners();
   }
 
@@ -1235,7 +1244,7 @@ class DataService extends ChangeNotifier {
 
   Future<void> addUser(AppUser user) async {
     _users.add(user);
-    await _saveList('users', _users, (u) => u.toMap());
+    await _saveCollection('users', _users, (u) => u.toMap(), (u) => u.id);
     notifyListeners();
   }
 
@@ -1243,15 +1252,16 @@ class DataService extends ChangeNotifier {
     final idx = _users.indexWhere((u) => u.id == user.id);
     if (idx >= 0) {
       _users[idx] = user;
-      await _saveList('users', _users, (u) => u.toMap());
+      await _saveCollection('users', _users, (u) => u.toMap(), (u) => u.id);
       notifyListeners();
     }
   }
 
   Future<bool> deleteUser(String userId) async {
     if (userId == 'user-admin') return false; // protege o admin principal
+    await _deleteDoc('users', userId);
     _users.removeWhere((u) => u.id == userId);
-    await _saveList('users', _users, (u) => u.toMap());
+    await _saveCollection('users', _users, (u) => u.toMap(), (u) => u.id);
     notifyListeners();
     return true;
   }
@@ -1287,7 +1297,7 @@ class DataService extends ChangeNotifier {
 
   Future<void> addNotification(AppNotification notification) async {
     _notifications.add(notification);
-    await _saveList('notifications', _notifications, (n) => n.toMap());
+    await _saveCollection('notifications', _notifications, (n) => n.toMap(), (n) => n.id);
     notifyListeners();
   }
 
@@ -1295,7 +1305,7 @@ class DataService extends ChangeNotifier {
     final idx = _notifications.indexWhere((n) => n.id == notificationId);
     if (idx >= 0) {
       _notifications[idx].isRead = true;
-      await _saveList('notifications', _notifications, (n) => n.toMap());
+      await _saveCollection('notifications', _notifications, (n) => n.toMap(), (n) => n.id);
       notifyListeners();
     }
   }
@@ -1304,7 +1314,7 @@ class DataService extends ChangeNotifier {
     for (final n in _notifications.where((n) => n.targetUserId == userId)) {
       n.isRead = true;
     }
-    await _saveList('notifications', _notifications, (n) => n.toMap());
+    await _saveCollection('notifications', _notifications, (n) => n.toMap(), (n) => n.id);
     notifyListeners();
   }
 
@@ -1326,7 +1336,7 @@ class DataService extends ChangeNotifier {
         referenceId: referenceId, createdAt: DateTime.now(),
       ));
     }
-    await _saveList('notifications', _notifications, (n) => n.toMap());
+    await _saveCollection('notifications', _notifications, (n) => n.toMap(), (n) => n.id);
     notifyListeners();
   }
 
@@ -1346,7 +1356,7 @@ class DataService extends ChangeNotifier {
         referenceId: referenceId, createdAt: DateTime.now(),
       ));
     }
-    await _saveList('notifications', _notifications, (n) => n.toMap());
+    await _saveCollection('notifications', _notifications, (n) => n.toMap(), (n) => n.id);
     notifyListeners();
   }
 
@@ -1453,7 +1463,7 @@ class DataService extends ChangeNotifier {
       calculatedValue: calc, minimumMonthly: client.minimumMonthly, finalValue: final_,
     );
     _billings.add(billing);
-    await _saveList('billings', _billings, (b) => b.toMap());
+    await _saveCollection('billings', _billings, (b) => b.toMap(), (b) => b.id);
     notifyListeners();
     return billing;
   }
@@ -1695,8 +1705,8 @@ class DataService extends ChangeNotifier {
       oldNotificationsToDelete: oldNotifications,
       orphanLotsToClean: orphanLots,
       estimatedStorageBytes: estimatedBytes,
-      lastCleanupAt: _prefs.getString('last_cleanup_at') != null
-          ? DateTime.tryParse(_prefs.getString('last_cleanup_at')!)
+      lastCleanupAt: null != null
+          ? null // last_cleanup_at migrado para Firestore
           : null,
     );
   }
@@ -1827,12 +1837,12 @@ class DataService extends ChangeNotifier {
 
     // ── Salvar e notificar ─────────────────────────────────────────────────
     if (!dryRun) {
-      await _prefs.setString('last_cleanup_at', now.toIso8601String());
-      await _saveList('orders', _orders, (o) => o.toMap());
-      await _saveList('orders_archive', _archivedOrders, (o) => o.toMap());
-      await _saveList('lots', _lots, (l) => l.toMap());
-      await _saveList('addresses', _addresses, (a) => a.toMap());
-      await _saveList('notifications', _notifications, (n) => n.toMap());
+      await _db.collection('settings').doc('cleanup').set({'lastCleanupAt': now.toIso8601String()});
+      await _saveCollection('orders', _orders, (o) => o.toMap(), (o) => o.id);
+      await _saveCollection('archivedOrders', _archivedOrders, (o) => o.toMap(), (o) => o.id);
+      await _saveCollection('lots', _lots, (l) => l.toMap(), (l) => l.id);
+      await _saveCollection('addresses', _addresses, (a) => a.toMap(), (a) => a.id);
+      await _saveCollection('notifications', _notifications, (n) => n.toMap(), (n) => n.id);
       notifyListeners();
     }
 
@@ -1887,7 +1897,7 @@ class DataService extends ChangeNotifier {
 
   /// Inicializa carregando também os arquivados.
   Future<void> _loadArchived() async {
-    _archivedOrders = _loadList('orders_archive', Order.fromMap);
+    // _archivedOrders carregado pelo _loadAll via Firestore
   }
 
   /// Busca pedido por ID, incluindo arquivados.
@@ -1909,8 +1919,8 @@ class DataService extends ChangeNotifier {
     if (idx < 0) return;
     final order = _archivedOrders.removeAt(idx);
     _orders.add(order);
-    await _saveList('orders', _orders, (o) => o.toMap());
-    await _saveList('orders_archive', _archivedOrders, (o) => o.toMap());
+    await _saveCollection('orders', _orders, (o) => o.toMap(), (o) => o.id);
+    await _saveCollection('archivedOrders', _archivedOrders, (o) => o.toMap(), (o) => o.id);
     notifyListeners();
   }
 
@@ -1921,7 +1931,7 @@ class DataService extends ChangeNotifier {
 
   Future<void> addPackageType(PackageType pt) async {
     _packageTypes.add(pt);
-    await _saveList('packageTypes', _packageTypes, (p) => p.toMap());
+    await _saveCollection('packageTypes', _packageTypes, (pt) => pt.toMap(), (pt) => pt.id);
     notifyListeners();
   }
 
@@ -1929,14 +1939,15 @@ class DataService extends ChangeNotifier {
     final idx = _packageTypes.indexWhere((p) => p.id == pt.id);
     if (idx >= 0) {
       _packageTypes[idx] = pt;
-      await _saveList('packageTypes', _packageTypes, (p) => p.toMap());
+      await _saveCollection('packageTypes', _packageTypes, (pt) => pt.toMap(), (pt) => pt.id);
       notifyListeners();
     }
   }
 
   Future<void> deletePackageType(String id) async {
+    await _deleteDoc('packageTypes', id);
     _packageTypes.removeWhere((p) => p.id == id);
-    await _saveList('packageTypes', _packageTypes, (p) => p.toMap());
+    await _saveCollection('packageTypes', _packageTypes, (pt) => pt.toMap(), (pt) => pt.id);
     notifyListeners();
   }
 
@@ -2038,7 +2049,7 @@ class DataService extends ChangeNotifier {
     }
 
     _tickets.add(ticket);
-    await _saveList('tickets', _tickets, (t) => t.toMap());
+    await _saveCollection('tickets', _tickets, (t) => t.toMap(), (t) => t.id);
     notifyListeners();
     return ticket;
   }
@@ -2072,7 +2083,7 @@ class DataService extends ChangeNotifier {
     if (senderRole == UserRole.client && ticket.status == TicketStatus.pendingClient) {
       ticket.status = TicketStatus.inProgress;
     }
-    await _saveList('tickets', _tickets, (t) => t.toMap());
+    await _saveCollection('tickets', _tickets, (t) => t.toMap(), (t) => t.id);
     notifyListeners();
   }
 
@@ -2082,7 +2093,7 @@ class DataService extends ChangeNotifier {
     _tickets[idx].assignedToUserId = userId;
     _tickets[idx].assignedToUserName = userName;
     _tickets[idx].updatedAt = DateTime.now();
-    await _saveList('tickets', _tickets, (t) => t.toMap());
+    await _saveCollection('tickets', _tickets, (t) => t.toMap(), (t) => t.id);
     notifyListeners();
   }
 
@@ -2094,7 +2105,7 @@ class DataService extends ChangeNotifier {
     if (status == TicketStatus.resolved || status == TicketStatus.closed) {
       _tickets[idx].resolvedAt = DateTime.now();
     }
-    await _saveList('tickets', _tickets, (t) => t.toMap());
+    await _saveCollection('tickets', _tickets, (t) => t.toMap(), (t) => t.id);
     notifyListeners();
   }
 
@@ -2108,7 +2119,7 @@ class DataService extends ChangeNotifier {
     _tickets[idx].status = TicketStatus.inProgress;
     _tickets[idx].startedAt = DateTime.now();   // marca início do atendimento
     _tickets[idx].updatedAt = DateTime.now();
-    await _saveList('tickets', _tickets, (t) => t.toMap());
+    await _saveCollection('tickets', _tickets, (t) => t.toMap(), (t) => t.id);
     notifyListeners();
   }
 
@@ -2129,7 +2140,7 @@ class DataService extends ChangeNotifier {
       sentAt: DateTime.now(),
       isSystem: true,
     ));
-    await _saveList('tickets', _tickets, (t) => t.toMap());
+    await _saveCollection('tickets', _tickets, (t) => t.toMap(), (t) => t.id);
     notifyListeners();
   }
 
@@ -2139,7 +2150,7 @@ class DataService extends ChangeNotifier {
     if (idx < 0) return;
     _tickets[idx].agentNotes = notes;
     _tickets[idx].updatedAt = DateTime.now();
-    await _saveList('tickets', _tickets, (t) => t.toMap());
+    await _saveCollection('tickets', _tickets, (t) => t.toMap(), (t) => t.id);
     notifyListeners();
   }
 
@@ -2151,7 +2162,7 @@ class DataService extends ChangeNotifier {
     _tickets[idx].returnQuantity = qty;
     _tickets[idx].returnOrderInvoice = invoice;
     _tickets[idx].updatedAt = DateTime.now();
-    await _saveList('tickets', _tickets, (t) => t.toMap());
+    await _saveCollection('tickets', _tickets, (t) => t.toMap(), (t) => t.id);
     notifyListeners();
   }
 
@@ -2164,7 +2175,7 @@ class DataService extends ChangeNotifier {
     _tickets[idx].adminApprovalNote = note;
     _tickets[idx].status = TicketStatus.inProgress;
     _tickets[idx].updatedAt = DateTime.now();
-    await _saveList('tickets', _tickets, (t) => t.toMap());
+    await _saveCollection('tickets', _tickets, (t) => t.toMap(), (t) => t.id);
     notifyListeners();
   }
 
@@ -2178,7 +2189,7 @@ class DataService extends ChangeNotifier {
     _tickets[idx].status = TicketStatus.closed;
     _tickets[idx].resolvedAt = DateTime.now();
     _tickets[idx].updatedAt = DateTime.now();
-    await _saveList('tickets', _tickets, (t) => t.toMap());
+    await _saveCollection('tickets', _tickets, (t) => t.toMap(), (t) => t.id);
     notifyListeners();
   }
 
@@ -2189,7 +2200,7 @@ class DataService extends ChangeNotifier {
     _tickets[idx].status = TicketStatus.resolved;
     _tickets[idx].resolvedAt = DateTime.now();
     _tickets[idx].updatedAt = DateTime.now();
-    await _saveList('tickets', _tickets, (t) => t.toMap());
+    await _saveCollection('tickets', _tickets, (t) => t.toMap(), (t) => t.id);
     notifyListeners();
   }
 
@@ -2303,7 +2314,7 @@ class DataService extends ChangeNotifier {
       return t.createdAt.year == month.year &&
           t.createdAt.month == month.month;
     });
-    await _saveList('tickets', _tickets, (t) => t.toMap());
+    await _saveCollection('tickets', _tickets, (t) => t.toMap(), (t) => t.id);
     notifyListeners();
   }
 
@@ -2402,7 +2413,7 @@ class DataService extends ChangeNotifier {
     _tickets[idx].rating = rating;
     _tickets[idx].ratingComment = comment;
     _tickets[idx].status = TicketStatus.closed;
-    await _saveList('tickets', _tickets, (t) => t.toMap());
+    await _saveCollection('tickets', _tickets, (t) => t.toMap(), (t) => t.id);
     notifyListeners();
   }
 
@@ -2429,7 +2440,7 @@ class DataService extends ChangeNotifier {
         isSystem: true,
       ));
     }
-    await _saveList('tickets', _tickets, (t) => t.toMap());
+    await _saveCollection('tickets', _tickets, (t) => t.toMap(), (t) => t.id);
     notifyListeners();
   }
 
@@ -2471,7 +2482,7 @@ class DataService extends ChangeNotifier {
 
   Future<void> updateSupportSettings(SupportSettings settings) async {
     _supportSettings = settings;
-    await _prefs.setString('supportSettings', jsonEncode(settings.toMap()));
+    final sData = settings.toMap(); sData.remove('id'); await _db.collection('settings').doc('support').set(sData);
     notifyListeners();
   }
 
@@ -2483,13 +2494,14 @@ class DataService extends ChangeNotifier {
 
   Future<void> addBillingExtra(BillingExtra extra) async {
     _billingExtras.add(extra);
-    await _saveList('billingExtras', _billingExtras, (e) => e.toMap());
+    await _saveCollection('billingExtras', _billingExtras, (be) => be.toMap(), (be) => be.id);
     notifyListeners();
   }
 
   Future<void> deleteBillingExtra(String id) async {
+    await _deleteDoc('billingExtras', id);
     _billingExtras.removeWhere((e) => e.id == id);
-    await _saveList('billingExtras', _billingExtras, (e) => e.toMap());
+    await _saveCollection('billingExtras', _billingExtras, (be) => be.toMap(), (be) => be.id);
     notifyListeners();
   }
 

@@ -1,6 +1,8 @@
+import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:intl/date_symbol_data_local.dart';
+import 'firebase_options.dart';
 import 'services/data_service.dart';
 import 'core/theme/app_theme.dart';
 import 'screens/auth/login_screen.dart';
@@ -9,6 +11,11 @@ import 'screens/main_shell.dart';
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await initializeDateFormatting('pt_BR', null);
+
+  // Inicializa Firebase antes de tudo
+  await Firebase.initializeApp(
+    options: DefaultFirebaseOptions.currentPlatform,
+  );
 
   final dataService = DataService();
   await dataService.initialize();
