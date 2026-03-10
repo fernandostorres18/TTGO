@@ -4,86 +4,27 @@
   <base href="/">
   <meta charset="UTF-8">
   <meta content="IE=Edge" http-equiv="X-UA-Compatible">
-  <meta name="description" content="TTGO Fulfillment Master - Sistema de Gestão Logística">
-
-  <!-- ⛔ Forçar NO-CACHE para evitar logo/assets antigos no browser -->
-  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
-  <meta http-equiv="Pragma" content="no-cache">
-  <meta http-equiv="Expires" content="0">
-
-  <!-- iOS meta tags & icons -->
+  <meta name="description" content="TTGO Fulfillment Master">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black">
   <meta name="apple-mobile-web-app-title" content="TTGO Fulfillment">
   <link rel="apple-touch-icon" href="icons/Icon-192.png">
-
-  <!-- Favicon -->
   <link rel="icon" type="image/png" href="favicon.png"/>
-
   <title>TTGO Fulfillment Master</title>
   <link rel="manifest" href="manifest.json">
-
   <style>
-    body {
-      margin: 0;
-      background-color: #7B1FA2;
-    }
-    #loading-screen {
-      position: fixed;
-      top: 0; left: 0; right: 0; bottom: 0;
-      background: linear-gradient(135deg, #6A0DAD 0%, #7B1FA2 50%, #5C0080 100%);
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      z-index: 9999;
-    }
-    #loading-screen img {
-      width: 200px;
-      margin-bottom: 32px;
-    }
-    .spinner {
-      width: 40px;
-      height: 40px;
-      border: 4px solid rgba(255,255,255,0.3);
-      border-top-color: #fff;
-      border-radius: 50%;
-      animation: spin 0.8s linear infinite;
-    }
-    @keyframes spin { to { transform: rotate(360deg); } }
+    body { margin: 0; background-color: #7B1FA2; }
   </style>
 </head>
 <body>
-  <!-- Tela de loading com logo TTGO enquanto o Flutter carrega -->
-  <div id="loading-screen">
-    <img src="assets/assets/images/ttgo_logo.png"
-         onerror="this.style.display='none'"
-         alt="TTGO">
-    <div class="spinner"></div>
-  </div>
-
   <script>
-    // Limpar Service Worker antigo para forçar atualização
+    // Limpa service workers antigos para forçar atualização
     if ('serviceWorker' in navigator) {
       navigator.serviceWorker.getRegistrations().then(function(registrations) {
-        for (let registration of registrations) {
-          // Verificar se é o service worker do Flutter
-          registration.update();
-        }
+        for (let r of registrations) { r.unregister(); }
       });
     }
-
-    // Remover tela de loading quando Flutter estiver pronto
-    window.addEventListener('flutter-first-frame', function() {
-      const loading = document.getElementById('loading-screen');
-      if (loading) {
-        loading.style.opacity = '0';
-        loading.style.transition = 'opacity 0.4s ease';
-        setTimeout(() => loading.remove(), 400);
-      }
-    });
   </script>
-
   <script src="flutter_bootstrap.js" async></script>
 </body>
 </html>
