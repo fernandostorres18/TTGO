@@ -3,24 +3,6 @@
 import 'package:flutter/material.dart' show Icons, IconData;
 import 'package:cloud_firestore/cloud_firestore.dart' show Timestamp;
 
-// Helper: converte Timestamp do Firestore OU String ISO para DateTime
-DateTime _parseDate(dynamic v) {
-  if (v == null) return DateTime.now();
-  if (v is Timestamp) return v.toDate();
-  if (v is String) return DateTime.parse(v);
-  if (v is int) return DateTime.fromMillisecondsSinceEpoch(v);
-  return DateTime.now();
-}
-
-DateTime? _parseDateOrNull(dynamic v) {
-  if (v == null) return null;
-  if (v is Timestamp) return v.toDate();
-  if (v is String) return DateTime.parse(v);
-  if (v is int) return DateTime.fromMillisecondsSinceEpoch(v);
-  return null;
-}
-import 'package:cloud_firestore/cloud_firestore.dart' show Timestamp;
-
 // ─── HELPER: converte Timestamp Firestore OU String para DateTime ──────────
 DateTime _parseDate(dynamic v) {
   if (v == null) return DateTime.now();
@@ -32,7 +14,7 @@ DateTime _parseDate(dynamic v) {
   return DateTime.now();
 }
 
-DateTime? _parseDateNullable(dynamic v) {
+DateTime? _parseDateOrNull(dynamic v) {
   if (v == null) return null;
   if (v is Timestamp) return v.toDate();
   if (v is DateTime) return v;
