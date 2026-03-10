@@ -1,45 +1,7 @@
 // lib/models/app_models.dart
 // Todos os modelos de dados do sistema Fulfillment Master
 import 'package:flutter/material.dart' show Icons, IconData;
-import 'package:cloud_firestore/cloud_firestore.dart' show Timestamp;
 
-// ─── HELPER: converte Timestamp Firestore OU String para DateTime ──────────
-DateTime _parseDate(dynamic v) {
-  if (v == null) return DateTime.now();
-  if (v is Timestamp) return v.toDate();
-  if (v is DateTime) return v;
-  if (v is String && v.isNotEmpty) {
-    try { return DateTime.parse(v); } catch (_) {}
-  }
-  return DateTime.now();
-}
-
-DateTime? _parseDateOrNull(dynamic v) {
-  if (v == null) return null;
-  if (v is Timestamp) return v.toDate();
-  if (v is DateTime) return v;
-  if (v is String && v.isNotEmpty) {
-    try { return DateTime.parse(v); } catch (_) {}
-  }
-  return null;
-}
-
-// ─── HELPER: converte enum salvo como String OU int ────────────────────────
-T _parseEnum<T extends Enum>(List<T> values, dynamic v, T fallback) {
-  if (v == null) return fallback;
-  if (v is int) {
-    if (v >= 0 && v < values.length) return values[v];
-    return fallback;
-  }
-  if (v is String) {
-    try {
-      return values.firstWhere((e) => e.name == v);
-    } catch (_) {
-      return fallback;
-    }
-  }
-  return fallback;
-}
 
 // ─── ENUMS ─────────────────────────────────────────────────────────────────
 
@@ -173,10 +135,10 @@ class AppUser {
 
   factory AppUser.fromMap(Map<String, dynamic> m) => AppUser(
     id: m['id'], name: m['name'], email: m['email'], password: m['password'],
-    role: _parseEnum(UserRole.values, m['role'], UserRole.admin),
+    role: UserRole.values[m['role'] ?? 0],
     clientId: m['clientId'],
     isActive: m['isActive'] ?? true,
-    createdAt: _parseDate(m['createdAt']),
+    createdAt: DateTime.parse(m['createdAt']),
   );
 }
 
@@ -237,8 +199,8 @@ class Client {
     priceMediumOrder: (m['priceMediumOrder'] ?? 0).toDouble(),
     priceLargeOrder: (m['priceLargeOrder'] ?? 0).toDouble(),
     priceEnvelopeOrder: (m['priceEnvelopeOrder'] ?? 5).toDouble(),
-    status: _parseEnum(ClientStatus.values, m['status'], ClientStatus.ativo),
-    createdAt: _parseDate(m['createdAt']),
+    status: ClientStatus.values[m['status'] ?? 0],
+    createdAt: DateTime.parse(m['createdAt']),
     photoUrl: m['photoUrl'],
   );
 
@@ -308,7 +270,7 @@ class Product {
     lengthCm: (m['lengthCm'] ?? 0).toDouble(),
     minimumStock: m['minimumStock'] ?? 0,
     isActive: m['isActive'] ?? true,
-    createdAt: _parseDate(m['createdAt']),
+    createdAt: DateTime.parse(m['createdAt']),
   );
 }
 
@@ -400,7 +362,7 @@ class Lot {
     id: m['id'], clientId: m['clientId'], productId: m['productId'],
     productName: m['productName'], productSku: m['productSku'],
     receivedQuantity: m['receivedQuantity'], currentQuantity: m['currentQuantity'],
-    receivedAt: _parseDate(m['receivedAt']),
+    receivedAt: DateTime.parse(m['receivedAt']),
     invoiceNumber: m['invoiceNumber'], addressId: m['addressId'],
     addressCode: m['addressCode'], barcode: m['barcode'],
     isActive: m['isActive'] ?? true,
@@ -431,7 +393,7 @@ class LotMovement {
 
   factory LotMovement.fromMap(Map<String, dynamic> m) => LotMovement(
     type: m['type'], quantity: m['quantity'],
-    date: _parseDate(m['date']),
+    date: DateTime.parse(m['date']),
     reference: m['reference'], description: m['description'],
   );
 }
@@ -462,7 +424,7 @@ class OrderEvent {
   };
 
   factory OrderEvent.fromMap(Map<String, dynamic> m) => OrderEvent(
-    id: m['id'], date: _parseDate(m['date']),
+    id: m['id'], date: DateTime.parse(m['date']),
     userId: m['userId'], userName: m['userName'],
     action: m['action'], description: m['description'],
   );
@@ -528,12 +490,12 @@ class Order {
     id: m['id'], clientId: m['clientId'], clientName: m['clientName'],
     invoiceNumber: m['invoiceNumber'],
     accessKey: m['accessKey'] ?? '',
-    createdAt: _parseDate(m['createdAt']),
+    createdAt: DateTime.parse(m['createdAt']),
     createdByUserId: m['createdByUserId'] ?? '',
     createdByUserName: m['createdByUserName'] ?? '',
-    updatedAt: m['updatedAt'] != null ? _parseDate(m['updatedAt']) : null,
-    status: _parseEnum(OrderStatus.values, m['status'], OrderStatus.recebido),
-    size: _parseEnum(OrderSize.values, m['size'], OrderSize.pequeno),
+    updatedAt: m['updatedAt'] != null ? DateTime.parse(m['updatedAt']) : null,
+    status: OrderStatus.values[m['status'] ?? 0],
+    size: OrderSize.values[m['size'] ?? 0],
     orderValue: (m['orderValue'] ?? 0).toDouble(),
     notes: m['notes'],
     isBilled: m['isBilled'] ?? false,
@@ -572,7 +534,7 @@ class OrderItem {
   factory OrderItem.fromMap(Map<String, dynamic> m) => OrderItem(
     productId: m['productId'], productName: m['productName'], sku: m['sku'],
     quantity: m['quantity'], separatedQuantity: m['separatedQuantity'] ?? 0,
-    itemSize: _parseEnum(OrderSize.values, m['itemSize'], OrderSize.pequeno),
+    itemSize: OrderSize.values[m['itemSize'] ?? 0],
   );
 }
 
@@ -649,7 +611,7 @@ class ReceivingRecord {
   factory ReceivingRecord.fromMap(Map<String, dynamic> m) => ReceivingRecord(
     id: m['id'], clientId: m['clientId'], clientName: m['clientName'],
     invoiceNumber: m['invoiceNumber'],
-    receivedAt: _parseDate(m['receivedAt']),
+    receivedAt: DateTime.parse(m['receivedAt']),
     operatorName: m['operatorName'], isCompleted: m['isCompleted'] ?? false,
     items: (m['items'] as List? ?? []).map((i) => ReceivingItem.fromMap(i)).toList(),
   );
@@ -748,7 +710,7 @@ class MonthlyBilling {
     minimumMonthly: (m['minimumMonthly'] ?? 0).toDouble(),
     finalValue: (m['finalValue'] ?? 0).toDouble(),
     isPaid: m['isPaid'] ?? false,
-    paidAt: m['paidAt'] != null ? _parseDate(m['paidAt']) : null,
+    paidAt: m['paidAt'] != null ? DateTime.parse(m['paidAt']) : null,
   );
 }
 
@@ -783,11 +745,11 @@ class AppNotification {
 
   factory AppNotification.fromMap(Map<String, dynamic> m) => AppNotification(
     id: m['id'], targetUserId: m['targetUserId'],
-    type: _parseEnum(NotificationType.values, m['type'], NotificationType.newOrder),
+    type: NotificationType.values[m['type'] ?? 0],
     title: m['title'], body: m['body'],
     referenceId: m['referenceId'],
     isRead: m['isRead'] ?? false,
-    createdAt: _parseDate(m['createdAt']),
+    createdAt: DateTime.parse(m['createdAt']),
   );
 }
 
@@ -991,7 +953,7 @@ class PackageType {
     maxWidthCm: (m['maxWidthCm'] ?? 0).toDouble(),
     maxHeightCm: (m['maxHeightCm'] ?? 0).toDouble(),
     isActive: m['isActive'] ?? true,
-    createdAt: _parseDate(m['createdAt']),
+    createdAt: DateTime.parse(m['createdAt']),
   );
 }
 
@@ -1080,8 +1042,8 @@ class TicketMessage {
 
   factory TicketMessage.fromMap(Map<String, dynamic> m) => TicketMessage(
     id: m['id'], senderId: m['senderId'], senderName: m['senderName'],
-    senderRole: _parseEnum(UserRole.values, m['senderRole'], UserRole.client),
-    text: m['text'], sentAt: _parseDate(m['sentAt']),
+    senderRole: UserRole.values[m['senderRole'] ?? 0],
+    text: m['text'], sentAt: DateTime.parse(m['sentAt']),
     isSystem: m['isSystem'] ?? false,
     attachmentUrl: m['attachmentUrl'],
     attachmentName: m['attachmentName'],
@@ -1190,9 +1152,9 @@ class SupportTicket {
   factory SupportTicket.fromMap(Map<String, dynamic> m) => SupportTicket(
     id: m['id'], clientId: m['clientId'], clientName: m['clientName'],
     createdByUserId: m['createdByUserId'], createdByUserName: m['createdByUserName'],
-    status: _parseEnum(TicketStatus.values, m['status'], TicketStatus.open),
-    priority: _parseEnum(TicketPriority.values, m['priority'], TicketPriority.normal),
-    category: _parseEnum(TicketCategory.values, m['category'], TicketCategory.general),
+    status: TicketStatus.values[m['status'] ?? 0],
+    priority: TicketPriority.values[m['priority'] ?? 1],
+    category: TicketCategory.values[m['category'] ?? 0],
     subject: m['subject'],
     relatedOrderId: m['relatedOrderId'],
     relatedOrderInvoice: m['relatedOrderInvoice'],
@@ -1201,9 +1163,9 @@ class SupportTicket {
     messages: (m['messages'] as List? ?? []).map((x) => TicketMessage.fromMap(x)).toList(),
     rating: m['rating'],
     ratingComment: m['ratingComment'],
-    createdAt: _parseDate(m['createdAt']),
-    updatedAt: m['updatedAt'] != null ? _parseDate(m['updatedAt']) : null,
-    resolvedAt: m['resolvedAt'] != null ? _parseDate(m['resolvedAt']) : null,
+    createdAt: DateTime.parse(m['createdAt']),
+    updatedAt: m['updatedAt'] != null ? DateTime.parse(m['updatedAt']) : null,
+    resolvedAt: m['resolvedAt'] != null ? DateTime.parse(m['resolvedAt']) : null,
     isReturnRequest: m['isReturnRequest'] ?? false,
     returnLotId: m['returnLotId'],
     returnToStock: m['returnToStock'],
@@ -1216,7 +1178,7 @@ class SupportTicket {
     adminApprovalNote: m['adminApprovalNote'],
     adminRejected: m['adminRejected'] ?? false,
     adminRejectionNote: m['adminRejectionNote'],
-    startedAt: m['startedAt'] != null ? _parseDate(m['startedAt']) : null,
+    startedAt: m['startedAt'] != null ? DateTime.parse(m['startedAt']) : null,
   );
 }
 
@@ -1311,6 +1273,6 @@ class BillingExtra {
     description: m['description'],
     value: (m['value'] ?? 0).toDouble(),
     createdByUserId: m['createdByUserId'],
-    createdAt: _parseDate(m['createdAt']),
+    createdAt: DateTime.parse(m['createdAt']),
   );
 }
