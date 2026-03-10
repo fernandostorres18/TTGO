@@ -54,8 +54,21 @@ class FulfillmentApp extends StatelessWidget {
   }
 }
 
-class _AppGate extends StatelessWidget {
+class _AppGate extends StatefulWidget {
   const _AppGate();
+  @override
+  State<_AppGate> createState() => _AppGateState();
+}
+
+class _AppGateState extends State<_AppGate> {
+  @override
+  void initState() {
+    super.initState();
+    // Garante que o app nunca fica preso: força rebuild após 10s no máximo
+    Future.delayed(const Duration(seconds: 10), () {
+      if (mounted) setState(() {});
+    });
+  }
 
   @override
   Widget build(BuildContext context) {

@@ -37,18 +37,31 @@ class DataService extends ChangeNotifier {
   void _listenAll() {
     void listen<T>(String col, T Function(Map<String,dynamic>) from, void Function(List<T>) set) {
       _subs.add(_db.collection(col).snapshots().listen((snap) {
-        set(snap.docs.map((d) {
-          final data = Map<String,dynamic>.from(d.data());
-          data['id'] = d.id;
-          return from(data);
-        }).toList());
+        // Parse seguro: ignora documentos com erro, não descarta os bons
+        final result = <T>[];
+        for (final d in snap.docs) {
+          try {
+            final data = Map<String,dynamic>.from(d.data());
+            data['id'] = d.id;
+            result.add(from(data));
+          } catch (_) {
+            // ignora só este doc, continua os demais
+          }
+        }
+        set(result);
         notifyListeners();
-      }, onError: (_) {}));
+      }, onError: (_) {
+        // Erro no stream (ex: regras Firestore) — libera o loading mesmo assim
+        if (!(_usersReadyCompleter?.isCompleted ?? true)) {
+          _usersReadyCompleter!.complete();
+        }
+        notifyListeners();
+      }));
     }
-    listen('users',        AppUser.fromMap,         (v) {
+    listen('users', AppUser.fromMap, (v) {
       _users = v;
-      // Resolve o completer quando chegarem usuários via stream
-      if (v.isNotEmpty && !(_usersReadyCompleter?.isCompleted ?? true)) {
+      // Resolve o completer assim que usuários chegarem (mesmo lista vazia = Firestore respondeu)
+      if (!(_usersReadyCompleter?.isCompleted ?? true)) {
         _usersReadyCompleter!.complete();
       }
     });
@@ -117,18 +130,17 @@ class DataService extends ChangeNotifier {
     _prefs = await SharedPreferences.getInstance();
     _usersReadyCompleter = Completer<void>();
 
-    // Liga os streams em tempo real — eles vão popular os dados automaticamente
+    // Liga os streams em tempo real — eles populam os dados automaticamente
     startAutoRefresh();
 
-    // Aguarda até os usuários chegarem do Firestore (máx 8 segundos)
-    // Assim que o primeiro snapshot chegar, _usersReadyCompleter é resolvido
+    // Aguarda o Firestore responder (usuários chegarem OU erro) — máx 10s
     try {
-      await _usersReadyCompleter!.future.timeout(const Duration(seconds: 8));
+      await _usersReadyCompleter!.future.timeout(const Duration(seconds: 10));
     } catch (_) {
-      // Timeout: Firestore demorou demais — libera a tela mesmo assim
+      // Timeout: libera a tela mesmo assim
     }
 
-    // Se nada veio do Firestore (sem internet / banco vazio), seed demo
+    // Seed apenas se o Firestore não retornou nenhum usuário
     if (_users.isEmpty) {
       try { await _seedDemoData(); } catch (_) {}
     }
