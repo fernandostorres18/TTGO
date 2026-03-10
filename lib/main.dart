@@ -23,8 +23,9 @@ void main() async {
 
   final dataService = DataService();
 
-  // initialize() NÃO bloqueia — retorna rápido e carrega em background
-  dataService.initialize(); // sem await intencional
+  // Roda initialize() em background — app abre imediatamente com splash
+  // Quando os dados chegarem, notifyListeners() faz o _AppGate sair do splash
+  dataService.initialize();
 
   runApp(
     ChangeNotifierProvider.value(

@@ -117,26 +117,20 @@ class DataService extends ChangeNotifier {
     _prefs = await SharedPreferences.getInstance();
     _usersReadyCompleter = Completer<void>();
 
-    // Inicia listeners em tempo real imediatamente
+    // Liga os streams em tempo real — eles vão popular os dados automaticamente
     startAutoRefresh();
 
-    // Tenta carregar dados iniciais com timeout de 10s
+    // Aguarda até os usuários chegarem do Firestore (máx 8 segundos)
+    // Assim que o primeiro snapshot chegar, _usersReadyCompleter é resolvido
     try {
-      await _loadAll().timeout(const Duration(seconds: 10));
+      await _usersReadyCompleter!.future.timeout(const Duration(seconds: 8));
     } catch (_) {
-      // Timeout ou erro: continua mesmo assim, streams vão popular os dados
+      // Timeout: Firestore demorou demais — libera a tela mesmo assim
     }
 
+    // Se nada veio do Firestore (sem internet / banco vazio), seed demo
     if (_users.isEmpty) {
-      // Seed só se realmente não veio nada do Firestore
-      try {
-        await _seedDemoData();
-      } catch (_) {}
-    }
-
-    // Resolve o completer — usuários prontos
-    if (!(_usersReadyCompleter?.isCompleted ?? true)) {
-      _usersReadyCompleter!.complete();
+      try { await _seedDemoData(); } catch (_) {}
     }
 
     _initializing = false;
