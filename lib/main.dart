@@ -12,20 +12,14 @@ void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await initializeDateFormatting('pt_BR', null);
 
-  // Inicializa Firebase com timeout — nunca bloqueia o app
   try {
     await Firebase.initializeApp(
       options: DefaultFirebaseOptions.currentPlatform,
     ).timeout(const Duration(seconds: 10));
-  } catch (_) {
-    // Se Firebase falhar, o app ainda abre (modo offline)
-  }
+  } catch (_) {}
 
   final dataService = DataService();
-
-  // Roda initialize() em background — app abre imediatamente com splash
-  // Quando os dados chegarem, notifyListeners() faz o _AppGate sair do splash
-  dataService.initialize();
+  dataService.initialize(); // sem await — roda em background
 
   runApp(
     ChangeNotifierProvider.value(
@@ -54,70 +48,15 @@ class FulfillmentApp extends StatelessWidget {
   }
 }
 
-class _AppGate extends StatefulWidget {
+class _AppGate extends StatelessWidget {
   const _AppGate();
-  @override
-  State<_AppGate> createState() => _AppGateState();
-}
-
-class _AppGateState extends State<_AppGate> {
-  @override
-  void initState() {
-    super.initState();
-    // Garante que o app nunca fica preso: força rebuild após 10s no máximo
-    Future.delayed(const Duration(seconds: 10), () {
-      if (mounted) setState(() {});
-    });
-  }
 
   @override
   Widget build(BuildContext context) {
     final ds = context.watch<DataService>();
-
-    // Enquanto o Firestore ainda não entregou os dados, mostra splash
-    if (ds.isInitializing) {
-      return const _SplashScreen();
-    }
-
-    if (ds.currentUser != null) {
-      return const MainShell();
-    }
+    // Se já logado → vai para o shell principal
+    if (ds.currentUser != null) return const MainShell();
+    // Caso contrário → sempre mostra login (sem splash, sem loading)
     return const LoginScreen();
-  }
-}
-
-class _SplashScreen extends StatelessWidget {
-  const _SplashScreen();
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      body: Container(
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-            colors: [
-              Color(0xFF6A0DAD),
-              Color(0xFF7B1FA2),
-              Color(0xFF5C0080),
-            ],
-          ),
-        ),
-        child: const Center(
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              CircularProgressIndicator(color: Colors.white),
-              SizedBox(height: 24),
-              Text(
-                'Carregando...',
-                style: TextStyle(color: Colors.white70, fontSize: 16),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
   }
 }
