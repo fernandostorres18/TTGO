@@ -1,9 +1,6 @@
 # Flutter/Dart
-# Build outputs — exclui tudo exceto build/web (necessário para o Vercel)
+# Build outputs — excluídos (deploy feito direto para Firebase Hosting)
 /build/
-!/build/
-!/build/web
-!/build/web/**
 /.dart_tool/
 .packages
 .pub-cache/
