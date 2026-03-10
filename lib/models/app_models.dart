@@ -24,6 +24,23 @@ DateTime? _parseDateOrNull(dynamic v) {
   return null;
 }
 
+// ─── HELPER: converte enum salvo como String OU int ────────────────────────
+T _parseEnum<T extends Enum>(List<T> values, dynamic v, T fallback) {
+  if (v == null) return fallback;
+  if (v is int) {
+    if (v >= 0 && v < values.length) return values[v];
+    return fallback;
+  }
+  if (v is String) {
+    try {
+      return values.firstWhere((e) => e.name == v);
+    } catch (_) {
+      return fallback;
+    }
+  }
+  return fallback;
+}
+
 // ─── ENUMS ─────────────────────────────────────────────────────────────────
 
 enum UserRole { admin, operator, client, supportAgent }
@@ -156,7 +173,7 @@ class AppUser {
 
   factory AppUser.fromMap(Map<String, dynamic> m) => AppUser(
     id: m['id'], name: m['name'], email: m['email'], password: m['password'],
-    role: UserRole.values[m['role'] ?? 0],
+    role: _parseEnum(UserRole.values, m['role'], UserRole.admin),
     clientId: m['clientId'],
     isActive: m['isActive'] ?? true,
     createdAt: _parseDate(m['createdAt']),
@@ -220,7 +237,7 @@ class Client {
     priceMediumOrder: (m['priceMediumOrder'] ?? 0).toDouble(),
     priceLargeOrder: (m['priceLargeOrder'] ?? 0).toDouble(),
     priceEnvelopeOrder: (m['priceEnvelopeOrder'] ?? 5).toDouble(),
-    status: ClientStatus.values[m['status'] ?? 0],
+    status: _parseEnum(ClientStatus.values, m['status'], ClientStatus.ativo),
     createdAt: _parseDate(m['createdAt']),
     photoUrl: m['photoUrl'],
   );
@@ -515,8 +532,8 @@ class Order {
     createdByUserId: m['createdByUserId'] ?? '',
     createdByUserName: m['createdByUserName'] ?? '',
     updatedAt: m['updatedAt'] != null ? _parseDate(m['updatedAt']) : null,
-    status: OrderStatus.values[m['status'] ?? 0],
-    size: OrderSize.values[m['size'] ?? 0],
+    status: _parseEnum(OrderStatus.values, m['status'], OrderStatus.recebido),
+    size: _parseEnum(OrderSize.values, m['size'], OrderSize.pequeno),
     orderValue: (m['orderValue'] ?? 0).toDouble(),
     notes: m['notes'],
     isBilled: m['isBilled'] ?? false,
@@ -555,7 +572,7 @@ class OrderItem {
   factory OrderItem.fromMap(Map<String, dynamic> m) => OrderItem(
     productId: m['productId'], productName: m['productName'], sku: m['sku'],
     quantity: m['quantity'], separatedQuantity: m['separatedQuantity'] ?? 0,
-    itemSize: OrderSize.values[m['itemSize'] ?? 0],
+    itemSize: _parseEnum(OrderSize.values, m['itemSize'], OrderSize.pequeno),
   );
 }
 
@@ -766,7 +783,7 @@ class AppNotification {
 
   factory AppNotification.fromMap(Map<String, dynamic> m) => AppNotification(
     id: m['id'], targetUserId: m['targetUserId'],
-    type: NotificationType.values[m['type'] ?? 0],
+    type: _parseEnum(NotificationType.values, m['type'], NotificationType.newOrder),
     title: m['title'], body: m['body'],
     referenceId: m['referenceId'],
     isRead: m['isRead'] ?? false,
@@ -1063,7 +1080,7 @@ class TicketMessage {
 
   factory TicketMessage.fromMap(Map<String, dynamic> m) => TicketMessage(
     id: m['id'], senderId: m['senderId'], senderName: m['senderName'],
-    senderRole: UserRole.values[m['senderRole'] ?? 0],
+    senderRole: _parseEnum(UserRole.values, m['senderRole'], UserRole.client),
     text: m['text'], sentAt: _parseDate(m['sentAt']),
     isSystem: m['isSystem'] ?? false,
     attachmentUrl: m['attachmentUrl'],
@@ -1173,9 +1190,9 @@ class SupportTicket {
   factory SupportTicket.fromMap(Map<String, dynamic> m) => SupportTicket(
     id: m['id'], clientId: m['clientId'], clientName: m['clientName'],
     createdByUserId: m['createdByUserId'], createdByUserName: m['createdByUserName'],
-    status: TicketStatus.values[m['status'] ?? 0],
-    priority: TicketPriority.values[m['priority'] ?? 1],
-    category: TicketCategory.values[m['category'] ?? 0],
+    status: _parseEnum(TicketStatus.values, m['status'], TicketStatus.open),
+    priority: _parseEnum(TicketPriority.values, m['priority'], TicketPriority.normal),
+    category: _parseEnum(TicketCategory.values, m['category'], TicketCategory.general),
     subject: m['subject'],
     relatedOrderId: m['relatedOrderId'],
     relatedOrderInvoice: m['relatedOrderInvoice'],
